@@ -1,0 +1,7 @@
+# Lo que ia.py se niega a hacer (después de la corrida de terminal-entrega)
+$ echo "# a medio hacer" >> tienda/tienda/carrito.py
+$ python3 ~/.claude/skills/inherited-audit/ia.py init --system tienda --repo SHOP=~/demo/tienda --out ~/demo/otra-corrida
+$ git -C tienda checkout -- .
+$ python3 ~/.claude/skills/inherited-audit/ia.py init --system tienda --repo SHOP=~/demo/tienda --out ~/demo/tienda/auditoria
+$ python3 ~/.claude/skills/inherited-audit/ia.py init --system tienda --repo SHOP=~/demo/tienda
+$ python3 ~/.claude/skills/inherited-audit/ia.py step --run tienda-inherited-audit/2026-10-18 deploy done

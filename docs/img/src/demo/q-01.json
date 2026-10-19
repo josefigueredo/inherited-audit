@@ -1,0 +1,5 @@
+{"report": "quality", "category": "carrito", "dimension": "code", "title": "El cálculo del neto está copiado en dos funciones",
+ "verdict": "confirmed", "severity": "low", "confidence": "docs", "source": "quality-lenses",
+ "what_happens": "total_con_envio repite la suma y el descuento de total(); un arreglo en una no llega a la otra.",
+ "evidence": [{"cite": "SHOP/tienda/carrito.py", "from": 7, "to": 10, "note": "mismo cálculo que las líneas 3-4"}],
+ "suggestion": "Que total_con_envio llame a total() y sume el envío.", "effort": "S"}

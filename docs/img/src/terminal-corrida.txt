@@ -1,0 +1,7 @@
+# Paso 0 sobre un repo de prueba (tienda): fijar la base, detectar, medir la suite
+$ python3 ~/.claude/skills/inherited-audit/ia.py init --system tienda --repo SHOP=~/demo/tienda --host claude-code
+$ python3 ~/.claude/skills/inherited-audit/ia.py detect --run tienda-inherited-audit/2026-10-18
+$ python3 ~/.claude/skills/inherited-audit/ia.py baseline --run tienda-inherited-audit/2026-10-18
+# Los obreros cargan sus candidatos en el esquema común
+$ for f in c-01 c-02 q-01; do python3 ~/.claude/skills/inherited-audit/ia.py finding add --run tienda-inherited-audit/2026-10-18 $f.json; done
+$ python3 ~/.claude/skills/inherited-audit/ia.py status --run tienda-inherited-audit/2026-10-18

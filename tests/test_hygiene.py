@@ -1,0 +1,412 @@
+from __future__ import annotations
+
+import unittest
+
+from helpers import git, make_dir, make_git_repo, run_cli, write_tree
+
+from ia import findings as findingsmod
+from ia import hygiene
+from ia import run as runmod
+from test_branches import add_finding, commit_on, new_run
+
+TOKEN40 = "AbCdEfGhIj" * 4  # 40 mixed-case alphanumerics: looks like a TruffleHog-style identifier
+SHA40 = "0123456789abcdef" * 2 + "01234567"
+AWS = "AKIAABCDEFGHIJKLMNOP"
+GHP = "ghp_" + "a1B2c3D4e5" * 3 + "a1B2c3"
+
+
+def _repo_with(files):
+    repo, sha = make_git_repo({"a.py": "one\n"})
+    commit_on(repo, "fix/x", files)
+    return repo, sha
+
+
+class CheckBranchTest(unittest.TestCase):
+    def check(self, files):
+        repo, sha = _repo_with(files)
+        return hygiene.check_branch(repo, sha, "fix/x")
+
+    def test_clean_branch(self):
+        self.assertEqual(self.check({"a.py": "two\n"}), [])
+
+    def test_mixed_40_char_token_flagged_and_masked(self):
+        out = self.check({"t.py": f"ids = '{TOKEN40}'\n"})
+        self.assertEqual(len(out), 1)
+        self.assertTrue(out[0].startswith("fix/x: 40-char identifier (TruffleHog false positive risk): "), out)
+        self.assertNotIn(TOKEN40, out[0])
+        self.assertIn("AbCd****", out[0])
+
+    def test_hex_sha_in_lockfile_not_flagged(self):
+        self.assertEqual(self.check({"lock.txt": f"resolved sha1-{SHA40}\nsha {SHA40}\n"}), [])
+
+    def test_39_and_41_char_tokens_not_flagged(self):
+        self.assertEqual(self.check({"t.py": f"{TOKEN40[:39]} {TOKEN40}x\n"}), [])
+
+    def test_only_added_lines_count(self):
+        repo, sha = make_git_repo({"a.py": f"old = '{TOKEN40}'\n"})
+        commit_on(repo, "fix/x", {"a.py": f"old = '{TOKEN40}'\nnew = 1\n"})
+        self.assertEqual(hygiene.check_branch(repo, sha, "fix/x"), [])
+
+    def test_local_tooling_files_flagged(self):
+        out = self.check({".serena/memories/m.md": "x\n", ".idea/w.xml": "x\n", "sub/.DS_Store": "x\n",
+                          "a.py.swp": "x\n", ".vscode/s.json": "{}\n", ".cursor/r": "x\n", ".claude/s.json": "{}\n"})
+        self.assertEqual(len(out), 7, out)
+        self.assertTrue(all(": local tooling file: " in line for line in out), out)
+
+    def test_normal_dotfiles_not_flagged(self):
+        self.assertEqual(self.check({".gitignore": "x\n", ".github/w.yml": "x: 1\n", "src/idea.py": "x\n"}), [])
+
+    def test_secret_patterns_flagged_and_masked(self):
+        for secret in (AWS, "-----BEGIN RSA PRIVATE KEY-----", GHP, "xoxb-123456789012-abcdefghijkl"):
+            with self.subTest(secret=secret):
+                repo, sha = make_git_repo({"a.py": "one\n"})
+                commit_on(repo, "fix/x", {"s.txt": f"key = {secret}\n"})
+                out = hygiene.check_branch(repo, sha, "fix/x")
+                self.assertEqual(len(out), 1, out)
+                self.assertIn(": possible secret: ", out[0])
+                self.assertNotIn(secret, out[0])
+                # a private-key line is never excerpted at all
+                self.assertIn("private key block" if "PRIVATE KEY" in secret else secret[:4] + "****", out[0])
+
+    def test_excerpt_is_at_most_80_chars(self):
+        out = self.check({"s.txt": "x" * 200 + f" {AWS} " + "y" * 200 + "\n"})
+        excerpt = out[0].split(": possible secret: ", 1)[1]
+        self.assertLessEqual(len(excerpt), 80)
+        self.assertIn("AKIA****", excerpt)
+
+    def test_pinned_action_is_info_not_problem(self):
+        repo, sha = _repo_with({".github/workflows/ci.yml": f"      - uses: actions/checkout@{SHA40} # v4\n"})
+        problems, info = hygiene.scan_branch(repo, sha, "fix/x")
+        self.assertEqual(problems, [])
+        self.assertEqual(len(info), 1)
+        self.assertIn("actions/checkout", info[0])
+        self.assertEqual(hygiene.check_branch(repo, sha, "fix/x"), [])
+
+    def test_snake_case_40_char_id_flagged(self):
+        ident = "test_" + "handles_the_empty_cart_case_ok_yes_please_now"[:35]
+        self.assertEqual(len(ident), 40)
+        out = self.check({"t.py": f"def {ident}():\n    pass\n"})
+        self.assertEqual(len(out), 1, out)
+        self.assertIn(": 40-char identifier", out[0])
+
+    def test_line_with_secret_and_token_masks_both_everywhere(self):
+        out = self.check({"s.txt": f"{AWS} {TOKEN40}\n"})
+        self.assertEqual(len(out), 2, out)
+        for line in out:
+            self.assertNotIn(AWS, line)
+            self.assertNotIn(TOKEN40, line)
+
+    def test_added_line_starting_with_plusplus_is_scanned(self):
+        repo, sha = make_git_repo({"a.py": "one\n"})
+        commit_on(repo, "fix/x", {"s.txt": f"++{AWS}\n"})
+        out = hygiene.check_branch(repo, sha, "fix/x")
+        self.assertEqual(len(out), 1, out)
+        self.assertIn(": possible secret: ", out[0])
+
+    def test_missing_branch_flagged(self):
+        repo, sha = make_git_repo({"a.py": "one\n"})
+        out = hygiene.check_branch(repo, sha, "fix/nope")
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0], "fix/nope: branch not found: not in the repo")
+
+
+class CheckOutputsTest(unittest.TestCase):
+    def test_secret_in_saved_output_flagged(self):
+        run = make_dir()
+        write_tree(run, {"outputs/BACK-baseline.txt": f"ok\nTOKEN={AWS}\n", "outputs/clean.txt": "fine\n"})
+        out = hygiene.check_outputs(run)
+        self.assertEqual(len(out), 1, out)
+        self.assertTrue(out[0].startswith("outputs/BACK-baseline.txt: possible secret: "), out)
+        self.assertNotIn(AWS, out[0])
+
+    def test_secret_and_token_on_one_line_masked_in_outputs(self):
+        run = make_dir()
+        write_tree(run, {"outputs/o.txt": f"{AWS} {TOKEN40} {GHP}\n"})
+        out = hygiene.check_outputs(run)
+        self.assertTrue(out)
+        for line in out:
+            for raw in (AWS, TOKEN40, GHP):
+                self.assertNotIn(raw, line)
+
+    def test_clean_or_missing_outputs(self):
+        run = make_dir()
+        self.assertEqual(hygiene.check_outputs(run), [])
+        write_tree(run, {"outputs/a.txt": f"{TOKEN40}\n"})  # the 40-char rule is for branches only
+        self.assertEqual(hygiene.check_outputs(run), [])
+
+
+class CheckRunDirTest(unittest.TestCase):
+    def manifest(self, repo):
+        return {"repos": [{"alias": "BACK", "path": str(repo), "subdir": "", "sha": "x", "remote": ""}]}
+
+    def test_run_dir_inside_repo_unignored_flagged(self):
+        repo, _ = make_git_repo({"a.py": "one\n"})
+        run = repo / "audit"
+        run.mkdir()
+        out = hygiene.check_run_dir(run, self.manifest(repo))
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("not ignored by git", out[0])
+
+    def test_run_dir_inside_repo_ignored_ok(self):
+        repo, _ = make_git_repo({".gitignore": "audit/\n"})
+        run = repo / "audit"
+        run.mkdir()
+        self.assertEqual(hygiene.check_run_dir(run, self.manifest(repo)), [])
+
+    def test_run_dir_outside_repo_ok(self):
+        repo, _ = make_git_repo({"a.py": "one\n"})
+        self.assertEqual(hygiene.check_run_dir(make_dir() / "run", self.manifest(repo)), [])
+
+
+PEM_LINES = ["MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKj",
+             "MBc3q2Jd8Fz1Qm0XyZpL4kWnHsRtUvAaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQq"]
+PEM = "\n".join(["-----BEGIN RSA PRIVATE KEY-----", *PEM_LINES, "-----END RSA PRIVATE KEY-----"]) + "\n"
+
+
+class PrivateKeyTest(unittest.TestCase):
+    def test_mask_text_masks_whole_block_inclusive(self):
+        out = hygiene.mask_text("before\n" + PEM + "after\n")
+        for line in PEM_LINES:
+            self.assertNotIn(line[:12], out)
+        self.assertIn("before", out)
+        self.assertIn("after", out)
+
+    def test_mask_text_state_survives_blank_and_keeps_line_count(self):
+        text = PEM + "ok\n"
+        self.assertEqual(len(hygiene.mask_text(text).split("\n")), len(text.split("\n")))
+
+    def test_in_key_at_detects_window_starting_mid_key(self):
+        lines = PEM.splitlines()
+        self.assertFalse(hygiene.in_key_at(lines, 0))
+        self.assertTrue(hygiene.in_key_at(lines, 1))
+        self.assertTrue(hygiene.in_key_at(lines, 2))
+        self.assertTrue(hygiene.in_key_at(lines, 3))
+        self.assertFalse(hygiene.in_key_at(lines, 4))
+
+    def test_outputs_and_reports_never_echo_body_lines(self):
+        run = make_dir()
+        write_tree(run, {"outputs/k.txt": PEM, "r-correctness.html": "<pre>\n" + PEM + "</pre>\n"})
+        out = hygiene.check_outputs(run) + hygiene.check_reports(run)
+        self.assertTrue(out)
+        for line in out:
+            for body in PEM_LINES:
+                self.assertNotIn(body[:12], line)
+
+    def test_publish_files_with_credentials_flagged(self):
+        run = make_dir()
+        write_tree(run, {"publish/commands.sh": "gh issue create --repo https://user:tok@github.com/o/r.git\n",
+                         "publish/issue-C-01.md": f"key {AWS}\n", "publish/pr-1.md": "fine\n"})
+        out = hygiene.check_publish(run)
+        self.assertEqual(len(out), 2, out)
+        text = "\n".join(out)
+        self.assertIn("publish/commands.sh", text)
+        self.assertIn("publish/issue-C-01.md", text)
+        self.assertNotIn("tok@", text)
+        self.assertNotIn(AWS, text)
+        self.assertEqual(hygiene.check_publish(make_dir()), [])
+
+    def test_cli_flags_credentials_in_publish(self):
+        repo, sha = make_git_repo({"a.py": "one\n"})
+        run = new_run(repo)
+        write_tree(run, {"publish/commands.sh": "git remote add o https://u:tok@h.example/o/r\n"})
+        res = run_cli(["hygiene", "--run", str(run)])
+        self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+        self.assertIn("publish/commands.sh", res.stdout)
+        self.assertNotIn("tok@", res.stdout + res.stderr)
+
+
+class KeyMaterialScanTest(unittest.TestCase):
+    def test_mid_key_hunk_in_branch_reports_without_excerpt(self):
+        body = [f"{PEM_LINES[0][:-3]}{n:03d}" for n in range(12)]
+        key = "\n".join(["-----BEGIN PRIVATE KEY-----", *body, "-----END PRIVATE KEY-----"]) + "\n"
+        repo, sha = make_git_repo({"k.pem": key})
+        commit_on(repo, "fix/x", {"k.pem": key.replace(body[8], PEM_LINES[1])})
+        out = hygiene.check_branch(repo, sha, "fix/x")
+        self.assertEqual(len(out), 1, out)
+        self.assertTrue(out[0].endswith("possible key material"), out)
+        self.assertNotIn(PEM_LINES[1][:12], out[0])
+
+    def test_token_inside_long_base64_run_has_no_excerpt(self):
+        repo, sha = make_git_repo({"a.py": "one\n"})
+        blob = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSj+AgEAAoIBAQC7VJTUt9Us8cKjMBc3q2Jd8Fz1Qm0Xy"
+        commit_on(repo, "fix/x", {"a.py": f"blob = '{blob}'\n"})
+        out = hygiene.check_branch(repo, sha, "fix/x")
+        self.assertTrue(out)
+        for line in out:
+            self.assertNotIn(blob[:12], line)
+            self.assertTrue(line.endswith("possible key material"), line)
+
+    def test_ssh_userinfo_with_password_is_masked_plain_git_user_is_not(self):
+        self.assertNotIn("pw1", hygiene.mask_line("ssh://u:pw1@h.example/o/r"))
+        self.assertEqual(hygiene.mask_line("ssh://git@github.com/o/r"), "ssh://git@github.com/o/r")
+        self.assertNotIn("tok", hygiene.mask_line("https://tok@h.example/o/r"))
+
+
+ONE_LINE_KEY = '{"private_key": "-----BEGIN PRIVATE KEY-----\\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcw\\n-----END PRIVATE KEY-----\\n", "x": 1}'
+ONE_BODY = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcw"
+
+
+class SingleLineKeyTest(unittest.TestCase):
+    def test_mask_text_and_mask_line_hide_the_body_keep_the_rest(self):
+        for out in (hygiene.mask_text(ONE_LINE_KEY), hygiene.mask_line(ONE_LINE_KEY)):
+            self.assertNotIn(ONE_BODY[:12], out)
+            self.assertIn('"x": 1', out)
+
+    def test_begin_without_end_masks_to_end_of_line(self):
+        out = hygiene.mask_text('k = "-----BEGIN PRIVATE KEY-----\\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcw')
+        self.assertNotIn("MIIEvQ", out)
+        self.assertIn('k = "', out)
+
+    def test_excerpt_never_prints_a_begin_line(self):
+        self.assertNotIn(ONE_BODY[:12], hygiene._excerpt(ONE_LINE_KEY))
+        self.assertNotIn("PRIVATE", hygiene._excerpt("-----BEGIN PRIVATE KEY-----"))
+
+    def test_scan_branch_never_prints_single_line_key(self):
+        repo, sha = make_git_repo({"a.py": "one\n"})
+        commit_on(repo, "fix/x", {"c.json": ONE_LINE_KEY + "\n"})
+        out = hygiene.check_branch(repo, sha, "fix/x")
+        self.assertTrue(out)
+        self.assertNotIn(ONE_BODY[:12], "\n".join(out))
+
+    def test_outputs_scan_never_prints_single_line_key(self):
+        run = make_dir()
+        write_tree(run, {"outputs/o.txt": ONE_LINE_KEY + "\n"})
+        out = hygiene.check_outputs(run)
+        self.assertTrue(out)
+        self.assertNotIn(ONE_BODY[:12], "\n".join(out))
+
+    def test_git_ssh_user_without_password_is_not_a_credential(self):
+        for url in ("git+ssh://git@github.com/o/r", "ssh://git@github.com/o/r"):
+            self.assertEqual(hygiene.mask_line(url), url)
+        self.assertNotIn("pw", hygiene.mask_line("git+ssh://u:pw@h/o/r"))
+        self.assertNotIn("tok", hygiene.mask_line("HTTPS://tok@h/o/r"))
+
+
+class OneRuleTest(unittest.TestCase):
+    def test_git_https_scheme_with_user_is_a_credential_everywhere(self):
+        url = "git+https://tok@github.com/o/r"
+        self.assertTrue(hygiene.has_credentials(url))
+        self.assertEqual(hygiene.strip_userinfo(url), "git+https://github.com/o/r")
+        self.assertNotIn("tok", hygiene.mask_line(url))
+        self.assertFalse(hygiene.has_credentials("git+ssh://git@github.com/o/r"))
+        self.assertTrue(hygiene.has_credentials("git+ssh://u:pw@github.com/o/r"))
+
+    def test_closed_key_followed_by_unclosed_begin_masks_the_next_line(self):
+        first = "a -----BEGIN PRIVATE KEY-----QUJD-----END PRIVATE KEY----- b -----BEGIN PRIVATE KEY-----"
+        out = hygiene.mask_text(first + "\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcw\n-----END PRIVATE KEY-----\nafter")
+        self.assertNotIn("MIIEvQ", out)
+        self.assertNotIn("QUJD", out)
+        self.assertTrue(out.endswith("after"))
+
+    def test_end_then_new_begin_on_the_same_line_stays_inside(self):
+        out = hygiene.mask_text("-----BEGIN PRIVATE KEY-----\nAAA\n-----END PRIVATE KEY----- -----BEGIN PRIVATE KEY-----\n"
+                                "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcw\n-----END PRIVATE KEY-----")
+        self.assertNotIn("MIIEvQ", out)
+
+
+class CliTest(unittest.TestCase):
+    def setup_run(self, files):
+        repo, sha = make_git_repo({"a.py": "one\n"})
+        run = new_run(repo)
+        commit_on(repo, "fix/x", files)
+        add_finding(run, "BACK", "fix/x")
+        return repo, run
+
+    def test_clean_exit_0_with_info(self):
+        _, run = self.setup_run({".github/w.yml": f"- uses: actions/checkout@{SHA40} # v4\n"})
+        res = run_cli(["hygiene", "--run", str(run)])
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        self.assertIn("info:", res.stdout)
+        self.assertIn("actions/checkout", res.stdout)
+
+    def test_problems_exit_1_and_never_print_secret(self):
+        _, run = self.setup_run({"s.txt": f"k = {AWS}\n", ".idea/x": "x\n"})
+        write_tree(run, {"outputs/o.txt": f"{GHP}\n"})
+        res = run_cli(["hygiene", "--run", str(run)])
+        self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+        self.assertIn("fix/x: possible secret", res.stdout)
+        self.assertIn("fix/x: local tooling file", res.stdout)
+        self.assertIn("outputs/o.txt: possible secret", res.stdout)
+        self.assertNotIn(AWS, res.stdout + res.stderr)
+        self.assertNotIn(GHP, res.stdout + res.stderr)
+
+    def test_tests_branch_is_checked(self):
+        repo, run = self.setup_run({"a.py": "two\n"})
+        commit_on(repo, "tests/x", {"t.py": f"k = '{AWS}'\n"})
+        manifest = runmod.load(run)
+        manifest["baseline"]["BACK"] = {"tests_branch": "tests/x"}
+        runmod.save(run, manifest)
+        res = run_cli(["hygiene", "--run", str(run)])
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("tests/x: possible secret", res.stdout)
+
+    def test_raw_secret_in_rendered_html_flagged(self):
+        _, run = self.setup_run({"a.py": "two\n"})
+        write_tree(run, {"s-correctness.html": f"<pre>{AWS}</pre>\n", "s-quality.html": "<pre>AKIA****</pre>\n"})
+        res = run_cli(["hygiene", "--run", str(run)])
+        self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+        self.assertIn("s-correctness.html: possible secret", res.stdout)
+        self.assertNotIn("s-quality.html", res.stdout)
+        self.assertNotIn(AWS, res.stdout + res.stderr)
+
+    def test_raw_secret_in_findings_json_flagged(self):
+        _, run = self.setup_run({"a.py": "two\n"})
+        write_tree(run, {"findings/C-09.json": '{"measurement": {"tool": "rg %s"}}\n' % AWS})
+        self.assertEqual(len(hygiene.check_findings(run)), 1)
+        res = run_cli(["hygiene", "--run", str(run)])
+        self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+        self.assertIn("findings/C-09.json: possible secret", res.stdout)
+        self.assertNotIn(AWS, res.stdout + res.stderr)
+
+
+    def test_masked_credential_url_in_a_finding_is_not_flagged_again(self):
+        _, run = self.setup_run({"a.py": "two\n"})
+        findingsmod.add(run, {"report": "correctness", "category": "x", "dimension": "security", "title": "t",
+                              "verdict": "candidate", "severity": "low", "confidence": "docs", "source": "t",
+                              "what_happens": "CI clones https://x-access-token:tok123@github.com/o/r.git",
+                              "evidence": [{"cite": "BACK/a.py", "from": 1, "to": 1, "note": ""}]})
+        self.assertNotIn("tok123", "".join(p.read_text() for p in (run / "findings").glob("*.json")))
+        self.assertEqual(hygiene.check_findings(run), [])
+        write_tree(run, {"findings/C-08.json": '{"what_happens": "https://u:pw@github.com/o/r"}\n'})
+        self.assertEqual(len(hygiene.check_findings(run)), 1)
+
+    def test_bad_run_is_an_error(self):
+        res = run_cli(["hygiene", "--run", str(make_dir())])
+        self.assertNotEqual(res.returncode, 0)
+
+
+class AtSignInPasswordTest(unittest.TestCase):
+    def test_password_with_one_or_two_at_signs_is_masked_whole(self):
+        for url in ("https://user:p@ss@github.com/o/r", "https://user:p@s@s@github.com/o/r?x=1",
+                    "ssh://user:p@ss@h.example/o/r", "https://tok@en@h.example#frag"):
+            masked = hygiene.mask_line(url)
+            self.assertIn("://****@", masked, url)
+            self.assertNotIn("ss@", masked.replace("****@", ""), url)
+            self.assertNotIn("user", masked, url)
+            self.assertTrue(hygiene.has_credentials(url))
+            self.assertFalse(hygiene._raw_userinfo(masked), masked)
+        self.assertEqual(hygiene.strip_userinfo("https://user:p@ss@github.com/o/r"), "https://github.com/o/r")
+
+    def test_partly_masked_userinfo_is_still_raw(self):
+        self.assertTrue(hygiene._raw_userinfo("https://****@ss@github.com/o/r"))
+
+    def test_already_masked_url_is_clean_and_raw_after_masked_is_flagged(self):
+        run = make_dir()
+        write_tree(run, {"findings/C-01.json": '{"a": "https://****@github.com/o/r"}\n'})
+        self.assertEqual(hygiene.check_findings(run), [])
+        write_tree(run, {"findings/C-02.json": '{"a": "https://****@a.example/x https://u:p@ss@b.example/y"}\n'})
+        out = hygiene.check_findings(run)
+        self.assertEqual(len(out), 1, out)
+        self.assertTrue(out[0].startswith("findings/C-02.json: credentials in a URL"), out)
+        self.assertNotIn("p@ss", out[0])
+        self.assertNotIn("ss@b", out[0])
+
+
+class MaskLineTest(unittest.TestCase):
+    def test_mask_line_keeps_whitespace_and_masks_secrets(self):
+        self.assertEqual(hygiene.mask_line(f"    k = '{AWS}'  "), "    k = 'AKIA****'  ")
+        self.assertEqual(hygiene.mask_line("plain"), "plain")
+
+
+if __name__ == "__main__":
+    unittest.main()

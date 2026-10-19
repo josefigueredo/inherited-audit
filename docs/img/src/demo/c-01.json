@@ -1,0 +1,4 @@
+{"report": "correctness", "category": "carrito", "dimension": "bug", "title": "Un cupón de más del 100% deja el total negativo",
+ "verdict": "candidate", "severity": "medium", "confidence": "execution", "source": "correctness-general",
+ "what_happens": "total() resta el porcentaje del cupón sin tope: con un cupón de 150% el carrito de 100 da -50.",
+ "evidence": [{"cite": "SHOP/tienda/carrito.py", "from": 1, "to": 4, "note": "no hay tope en cupon_pct"}]}

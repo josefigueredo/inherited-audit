@@ -1,0 +1,7 @@
+# Con un HOME de prueba: el enlace apunta solo a skill/
+$ ./install.sh
+$ ./install.sh --agents
+$ readlink ~/.claude/skills/inherited-audit
+$ test -e ~/.claude/skills/inherited-audit/eval || echo "eval/ no se instala"
+$ test -e ~/.agents/skills/inherited-audit || echo "nada en ~/.agents/skills"
+$ python3 ~/.claude/skills/inherited-audit/ia.py --help | head -4

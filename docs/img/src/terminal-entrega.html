@@ -1,0 +1,37 @@
+<!doctype html><meta charset="utf-8"><style>*{box-sizing:border-box}body{margin:0;background:#cfd3e6;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",Helvetica,Arial,sans-serif}
+.win{margin:22px;border-radius:12px;overflow:hidden;box-shadow:0 18px 50px rgba(20,20,40,.35),0 0 0 1px rgba(0,0,0,.25)}
+.bar{height:38px;background:#2b2b31;display:flex;align-items:center;padding:0 14px;position:relative}
+.dots span{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:8px}
+.dots .r{background:#ff5f57}.dots .y{background:#febc2e}.dots .g{background:#28c840}
+.ttl{position:absolute;left:0;right:0;text-align:center;color:#a9a9b3;font-size:13px}
+.term{background:#16161a;color:#e6e6ea;font:13.5px/1.5 Menlo,Monaco,monospace;padding:14px 18px 18px;white-space:pre-wrap;word-break:break-word}
+.p{color:#7ee787}.c{color:#7d8590}.o{color:#e6e6ea}.k{color:#79c0ff}.a{color:#d2a8ff}.u{color:#ffa657}</style><div class="win" style="width:1196px"><div class="bar"><div class="dots"><span class="r"></span><span class="y"></span><span class="g"></span></div><div class="ttl">zsh — ~/demo</div></div><div class="term"><span class="c"># El test de la rama del hallazgo falla en la base por una aserción</span>
+<span class="p">$</span> <span class="k">cd tienda &amp;&amp; git switch -q fix/c-01-cupon-mayor-a-cien &amp;&amp; python3 -m unittest tests.test_cupon_tope 2&gt;&amp;1 | tee ../tienda-inherited-audit/2026-10-18/outputs/C-01-red.txt; git switch -q main</span>
+<span class="o">F</span>
+<span class="o">======================================================================</span>
+<span class="o">FAIL: test_un_cupon_de_mas_del_cien_no_deja_el_total_negativo (tests.test_cupon_tope.CuponTopeTest.test_un_cupon_de_mas_del_cien_no_deja_el_total_negativo)</span>
+<span class="o">----------------------------------------------------------------------</span>
+<span class="o">Traceback (most recent call last):</span>
+<span class="o">  File &quot;~/demo/tienda/tests/test_cupon_tope.py&quot;, line 8, in test_un_cupon_de_mas_del_cien_no_deja_el_total_negativo</span>
+<span class="o">    self.assertGreaterEqual(total([(100, 1)], cupon_pct=150), 0)</span>
+<span class="o">    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^</span>
+<span class="o">AssertionError: -50.0 not greater than or equal to 0</span>
+<span class="o"></span>
+<span class="o">----------------------------------------------------------------------</span>
+<span class="o">Ran 1 test in 0.000s</span>
+<span class="o"></span>
+<span class="o">FAILED (failures=1)</span>
+<span class="p">$</span> <span class="k">python3 ~/.claude/skills/inherited-audit/ia.py finding set --run tienda-inherited-audit/2026-10-18 C-01 verdict=confirmed confidence=execution branch=fix/c-01-cupon-mayor-a-cien sha_test=$(git -C tienda rev-parse fix/c-01-cupon-mayor-a-cien) &#x27;tests=[{&quot;path&quot;:&quot;tests/test_cupon_tope.py&quot;,&quot;red&quot;:&quot;1 of 1 fail&quot;,&quot;green&quot;:&quot;&quot;,&quot;note&quot;:&quot;&quot;}]&#x27; &#x27;red_reason=assertGreaterEqual falla: total() devuelve -50.0 con un cupón de 150%&#x27; outputs.red=outputs/C-01-red.txt</span>
+<span class="o">C-01</span>
+<span class="c"># Antes de entregar: citas, higiene, filtro y los dos reportes</span>
+<span class="p">$</span> <span class="k">python3 ~/.claude/skills/inherited-audit/ia.py cite-check --run tienda-inherited-audit/2026-10-18</span>
+<span class="o">all 3 citations resolve</span>
+<span class="p">$</span> <span class="k">python3 ~/.claude/skills/inherited-audit/ia.py hygiene --run tienda-inherited-audit/2026-10-18</span>
+<span class="o">hygiene: clean</span>
+<span class="p">$</span> <span class="k">python3 ~/.claude/skills/inherited-audit/ia.py filter --run tienda-inherited-audit/2026-10-18</span>
+<span class="o">correctness: showing 1 of 2</span>
+<span class="o">quality: showing 1 of 1</span>
+<span class="o">start here: Q-01</span>
+<span class="p">$</span> <span class="k">python3 ~/.claude/skills/inherited-audit/ia.py render --run tienda-inherited-audit/2026-10-18</span>
+<span class="o">tienda-inherited-audit/2026-10-18/tienda-correctness.html</span>
+<span class="o">tienda-inherited-audit/2026-10-18/tienda-quality.html</span></div></div>

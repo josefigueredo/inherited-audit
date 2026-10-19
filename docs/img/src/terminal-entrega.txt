@@ -1,0 +1,8 @@
+# El test de la rama del hallazgo falla en la base por una aserción
+$ cd tienda && git switch -q fix/c-01-cupon-mayor-a-cien && python3 -m unittest tests.test_cupon_tope 2>&1 | tee ../tienda-inherited-audit/2026-10-18/outputs/C-01-red.txt; git switch -q main
+$ python3 ~/.claude/skills/inherited-audit/ia.py finding set --run tienda-inherited-audit/2026-10-18 C-01 verdict=confirmed confidence=execution branch=fix/c-01-cupon-mayor-a-cien sha_test=$(git -C tienda rev-parse fix/c-01-cupon-mayor-a-cien) 'tests=[{"path":"tests/test_cupon_tope.py","red":"1 of 1 fail","green":"","note":""}]' 'red_reason=assertGreaterEqual falla: total() devuelve -50.0 con un cupón de 150%' outputs.red=outputs/C-01-red.txt
+# Antes de entregar: citas, higiene, filtro y los dos reportes
+$ python3 ~/.claude/skills/inherited-audit/ia.py cite-check --run tienda-inherited-audit/2026-10-18
+$ python3 ~/.claude/skills/inherited-audit/ia.py hygiene --run tienda-inherited-audit/2026-10-18
+$ python3 ~/.claude/skills/inherited-audit/ia.py filter --run tienda-inherited-audit/2026-10-18
+$ python3 ~/.claude/skills/inherited-audit/ia.py render --run tienda-inherited-audit/2026-10-18

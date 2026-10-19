@@ -1,0 +1,4 @@
+{"report": "correctness", "category": "carrito", "dimension": "bug", "title": "El envío gratis podría cambiar con precios en centavos",
+ "verdict": "candidate", "severity": "low", "confidence": "unverified", "source": "correctness-general",
+ "what_happens": "Inferencia: si los precios llegan en centavos, el umbral de 100 deja de ser el esperado. No se probó.",
+ "evidence": [{"cite": "SHOP/tienda/carrito.py", "from": 10, "to": 10, "note": "umbral fijo"}]}

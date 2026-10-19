@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="$lang">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>$title</title>
+<style>
+$style
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="side" aria-label="$toc_label">
+  <div class="brand">$brand<small>$brand_sub</small></div>
+  <ol id="toc">
+$toc
+  </ol>
+  <div class="side-foot"><div class="foot-row"><span class="ver">$footer</span>
+    <button class="theme-toggle" type="button" title="$theme_label" aria-label="$theme_label">&#9680;</button></div></div>
+</nav>
+<main>
+<header class="hero">
+  <h1>$title</h1>
+  <p>$intro</p>
+</header>
+$body
+</main>
+</div>
+<script>
+(function () {
+  var root = document.documentElement;
+  var btn = document.querySelector(".theme-toggle");
+  try { var saved = localStorage.getItem("ia-theme"); if (saved) { root.setAttribute("data-theme", saved); } } catch (e) {}
+  if (btn) {
+    btn.addEventListener("click", function () {
+      var dark = root.getAttribute("data-theme") === "dark" ||
+        (!root.getAttribute("data-theme") && window.matchMedia("(prefers-color-scheme: dark)").matches);
+      var next = dark ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem("ia-theme", next); } catch (e) {}
+    });
+  }
+  var links = Array.prototype.slice.call(document.querySelectorAll("#toc > li > a"));
+  if (!("IntersectionObserver" in window) || !links.length) { return; }
+  var byId = {};
+  links.forEach(function (a) { byId[a.getAttribute("href").slice(1)] = a; });
+  var obs = new IntersectionObserver(function (entries) {
+    entries.forEach(function (en) {
+      if (en.isIntersecting && byId[en.target.id]) {
+        links.forEach(function (a) { a.classList.remove("active"); });
+        byId[en.target.id].classList.add("active");
+      }
+    });
+  }, { rootMargin: "0px 0px -70% 0px" });
+  Object.keys(byId).forEach(function (id) { var el = document.getElementById(id); if (el) { obs.observe(el); } });
+})();
+</script>
+</body>
+</html>

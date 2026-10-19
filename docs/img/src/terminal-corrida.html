@@ -1,0 +1,39 @@
+<!doctype html><meta charset="utf-8"><style>*{box-sizing:border-box}body{margin:0;background:#cfd3e6;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",Helvetica,Arial,sans-serif}
+.win{margin:22px;border-radius:12px;overflow:hidden;box-shadow:0 18px 50px rgba(20,20,40,.35),0 0 0 1px rgba(0,0,0,.25)}
+.bar{height:38px;background:#2b2b31;display:flex;align-items:center;padding:0 14px;position:relative}
+.dots span{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:8px}
+.dots .r{background:#ff5f57}.dots .y{background:#febc2e}.dots .g{background:#28c840}
+.ttl{position:absolute;left:0;right:0;text-align:center;color:#a9a9b3;font-size:13px}
+.term{background:#16161a;color:#e6e6ea;font:13.5px/1.5 Menlo,Monaco,monospace;padding:14px 18px 18px;white-space:pre-wrap;word-break:break-word}
+.p{color:#7ee787}.c{color:#7d8590}.o{color:#e6e6ea}.k{color:#79c0ff}.a{color:#d2a8ff}.u{color:#ffa657}</style><div class="win" style="width:1196px"><div class="bar"><div class="dots"><span class="r"></span><span class="y"></span><span class="g"></span></div><div class="ttl">zsh — ~/demo</div></div><div class="term"><span class="c"># Paso 0 sobre un repo de prueba (tienda): fijar la base, detectar, medir la suite</span>
+<span class="p">$</span> <span class="k">python3 ~/.claude/skills/inherited-audit/ia.py init --system tienda --repo SHOP=~/demo/tienda --host claude-code</span>
+<span class="o">~/demo/tienda-inherited-audit/2026-10-18</span>
+<span class="p">$</span> <span class="k">python3 ~/.claude/skills/inherited-audit/ia.py detect --run tienda-inherited-audit/2026-10-18</span>
+<span class="o">SHOP: python  test: python3 -m unittest discover -s tests  deps: none</span>
+<span class="o">missing workers (never installed without asking):</span>
+<span class="o">  [claude-code] static: semgrep  -&gt;  brew install semgrep  (fallback: references/passes/supply-chain-container.md)</span>
+<span class="o">  [claude-code] static: osv-scanner  -&gt;  brew install osv-scanner  (fallback: references/passes/supply-chain-container.md)</span>
+<span class="p">$</span> <span class="k">python3 ~/.claude/skills/inherited-audit/ia.py baseline --run tienda-inherited-audit/2026-10-18</span>
+<span class="o">SHOP: unittest  passed: 2  failed: 0  total: 2  exit: 0  output: outputs/baseline-SHOP.txt</span>
+<span class="c"># Los obreros cargan sus candidatos en el esquema común</span>
+<span class="p">$</span> <span class="k">for f in c-01 c-02 q-01; do python3 ~/.claude/skills/inherited-audit/ia.py finding add --run tienda-inherited-audit/2026-10-18 $f.json; done</span>
+<span class="o">C-01</span>
+<span class="o">C-02</span>
+<span class="o">Q-01</span>
+<span class="p">$</span> <span class="k">python3 ~/.claude/skills/inherited-audit/ia.py status --run tienda-inherited-audit/2026-10-18</span>
+<span class="o">system: tienda  created: 2026-10-18  lang: es  host: claude-code</span>
+<span class="o">repo SHOP: 1730330c7eeef992055d74608c8dd55f5ff4764a  (no remote)</span>
+<span class="o">steps:</span>
+<span class="o">  baseline: done</span>
+<span class="o">  correctness: pending</span>
+<span class="o">  proof: pending</span>
+<span class="o">  tests: pending</span>
+<span class="o">  quality: pending</span>
+<span class="o">  contrast: pending</span>
+<span class="o">  verify: pending</span>
+<span class="o">  filter: pending</span>
+<span class="o">  prose: pending</span>
+<span class="o">  hygiene: pending</span>
+<span class="o">  render: pending</span>
+<span class="o">findings: candidate: 2, confirmed: 1, discarded: 0, blocked: 0</span>
+<span class="o">next: correctness</span></div></div>
