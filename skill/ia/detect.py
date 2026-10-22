@@ -120,7 +120,47 @@ class PythonDetector:
         return plan
 
 
-DETECTORS: list = [TsJsDetector(), PythonDetector()]
+def _read(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+class JvmDetector:
+    """Java and Kotlin with Maven or Gradle (Spring Boot or not).
+
+    Dependencies live in ~/.m2 or ~/.gradle, not in the repo, so the suite runs offline (`-o`, `--offline`): fetching
+    them is installing, and only `deps=install` runs `install_cmd` first. The counts come from the JUnit XML reports
+    (`junit`), because Gradle prints no summary when every test passes and Maven prints one per module.
+    """
+    name = "jvm"
+    MAVEN = ("pom.xml",)
+    GRADLE = ("build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts")
+
+    def matches(self, root: Path) -> bool:
+        return any((root / f).is_file() for f in self.MAVEN + self.GRADLE)
+
+    def plan(self, root: Path, sha: Optional[str] = None) -> dict:
+        plan = _base_plan()
+        if (root / "pom.xml").is_file():
+            mvn = "./mvnw" if (root / "mvnw").is_file() else "mvn"
+            plan.update(test_cmd=[mvn, "-B", "-ntp", "-o", "-Dmaven.test.failure.ignore=true", "test"],
+                        install_cmd=[mvn, "-B", "-ntp", "dependency:go-offline"],
+                        junit=["**/target/surefire-reports/TEST-*.xml"])
+            build = _read(root / "pom.xml")
+        else:
+            gradle = "./gradlew" if (root / "gradlew").is_file() else "gradle"
+            plan.update(test_cmd=[gradle, "test", "--offline", "--continue", "--console=plain"],
+                        install_cmd=[gradle, "dependencies", "--console=plain"],
+                        junit=["**/build/test-results/**/TEST-*.xml"])
+            build = "".join(_read(root / f) for f in self.GRADLE)
+        if "org.springframework.boot" in build or "spring-boot" in build:
+            plan["framework"] = "spring-boot"
+        return plan
+
+
+DETECTORS: list = [JvmDetector(), TsJsDetector(), PythonDetector()]
 
 MODULE_CONTAINERS = ("src/modules", "src/features", "src/app", "app", "src/components")
 NOT_MODULES = {"tests", "test", "__tests__", "spec", "specs", "e2e", "node_modules", "dist", "build", "out", "target",
@@ -157,6 +197,8 @@ def detect_modules(root: Path) -> List[str]:
     (of `root` when there is no `src/`), and the pseudo-module `src/.` (or `.`) when files sit directly in that folder.
     Sorted, so the same tree gives the same list."""
     root = Path(root)
+    if JvmDetector().matches(root):
+        return _jvm_modules(root)
     found = set()
     for container in MODULE_CONTAINERS:
         found.update(f"{container}/{n}" for n in _module_dirs(root / container))
@@ -166,6 +208,58 @@ def detect_modules(root: Path) -> List[str]:
     found.update(f"{base}/{n}" if base else n for n in _module_dirs(root / base) if n not in skip)
     if _has_root_files(root / base if base else root):
         found.add(f"{base}/{ROOT_FILES}" if base else ROOT_FILES)
+    return sorted(found)
+
+
+JVM_SOURCES = ("src/main/java", "src/main/kotlin")
+BUILD_FILES = JvmDetector.MAVEN + JvmDetector.GRADLE
+
+
+def _package_root(source: Path) -> Path:
+    """The base package: walk down while a folder holds exactly one folder and no file (com/acme/shop)."""
+    here = source
+    while True:
+        try:
+            children = [c for c in here.iterdir() if not c.name.startswith(".")]
+        except OSError:
+            return here
+        dirs = [c for c in children if c.is_dir()]
+        if len(dirs) != 1 or any(c.is_file() for c in children):
+            return here
+        here = dirs[0]
+
+
+def _jvm_projects(root: Path) -> List[Path]:
+    """The root and every sub-project with its own build file (Maven modules, Gradle subprojects), two levels deep."""
+    found = [root]
+    for depth in ("*", "*/*"):
+        for build in sorted(root.glob(f"{depth}/pom.xml")) + sorted(
+                p for name in JvmDetector.GRADLE for p in root.glob(f"{depth}/{name}")):
+            project = build.parent
+            if project not in found and not any(part in NOT_MODULES or part.startswith(".")
+                                                for part in project.relative_to(root).parts):
+                found.append(project)
+    return found
+
+
+def _jvm_modules(root: Path) -> List[str]:
+    """Per project: the children of the base package of src/main/java|kotlin (Spring's package by feature or by
+    layer), `<base package>/.` for the files sitting in it (the @SpringBootApplication class), and src/main/resources
+    (application.yml and its profiles)."""
+    found = set()
+    for project in _jvm_projects(root):
+        for source in JVM_SOURCES:
+            if not (project / source).is_dir():
+                continue
+            base = _package_root(project / source)
+            rel = base.relative_to(root).as_posix()
+            children = _module_dirs(base)
+            found.update(f"{rel}/{name}" for name in children)
+            if _has_root_files(base):  # a package with no sub-package is one module, not a `/.` of itself
+                found.add(f"{rel}/{ROOT_FILES}" if children else rel)
+        resources = project / "src/main/resources"
+        if resources.is_dir() and any(files for _, _, files in os.walk(resources)):
+            found.add(resources.relative_to(root).as_posix())
     return sorted(found)
 
 

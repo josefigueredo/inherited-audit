@@ -55,7 +55,7 @@ class StackTests(unittest.TestCase):
         self.assertIsNone(plan["coverage_cmd"])
 
     def test_unknown_stack_marked_unmeasured(self):
-        plan = detect.detect_repo(_tree({"pom.xml": "<project/>"}))
+        plan = detect.detect_repo(_tree({"Cargo.toml": "[package]\nname = 'x'\n"}))
         self.assertEqual(plan["stack"], "unknown")
         self.assertIs(plan["measured"], False)
         self.assertIsNone(plan["test_cmd"])
@@ -124,6 +124,72 @@ class StackTests(unittest.TestCase):
         repo, sha = make_git_repo({"web/package.json": PKG_VITEST, "web/package-lock.json": "lock-a"})
         (repo / "web" / "node_modules").mkdir()
         self.assertEqual(detect.detect_repo(repo / "web", sha)["deps"], "symlink")
+
+
+POM_SPRING = ("<project><parent><groupId>org.springframework.boot</groupId>"
+              "<artifactId>spring-boot-starter-parent</artifactId></parent></project>")
+GRADLE_KTS_SPRING = 'plugins { id("org.springframework.boot") version "3.3.0"; kotlin("jvm") }\n'
+
+
+class JvmStackTests(unittest.TestCase):
+    def test_maven_runs_offline_and_reads_surefire_reports(self):
+        plan = detect.detect_repo(_tree({"pom.xml": "<project/>"}))
+        self.assertEqual((plan["stack"], plan["measured"]), ("jvm", True))
+        self.assertEqual(plan["test_cmd"], ["mvn", "-B", "-ntp", "-o", "-Dmaven.test.failure.ignore=true", "test"])
+        self.assertEqual(plan["junit"], ["**/target/surefire-reports/TEST-*.xml"])
+        self.assertEqual(plan["install_cmd"], ["mvn", "-B", "-ntp", "dependency:go-offline"])
+        self.assertEqual((plan["deps"], plan["deps_dirs"], plan["coverage_cmd"]), ("none", [], None))
+        self.assertNotIn("framework", plan)
+
+    def test_maven_wrapper_is_preferred(self):
+        plan = detect.detect_repo(_tree({"pom.xml": "<project/>", "mvnw": "#!/bin/sh\n"}))
+        self.assertEqual(plan["test_cmd"][0], "./mvnw")
+        self.assertEqual(plan["install_cmd"][0], "./mvnw")
+
+    def test_gradle_kotlin_dsl_with_wrapper_runs_offline_and_reads_test_results(self):
+        plan = detect.detect_repo(_tree({"build.gradle.kts": GRADLE_KTS_SPRING, "gradlew": "#!/bin/sh\n"}))
+        self.assertEqual(plan["stack"], "jvm")
+        self.assertEqual(plan["test_cmd"], ["./gradlew", "test", "--offline", "--continue", "--console=plain"])
+        self.assertEqual(plan["junit"], ["**/build/test-results/**/TEST-*.xml"])
+        self.assertEqual(plan["install_cmd"], ["./gradlew", "dependencies", "--console=plain"])
+        self.assertEqual(plan["framework"], "spring-boot")
+
+    def test_gradle_groovy_without_wrapper(self):
+        plan = detect.detect_repo(_tree({"build.gradle": "apply plugin: 'java'\n"}))
+        self.assertEqual(plan["test_cmd"][0], "gradle")
+
+    def test_spring_boot_in_a_pom(self):
+        self.assertEqual(detect.detect_repo(_tree({"pom.xml": POM_SPRING}))["framework"], "spring-boot")
+
+    def test_jvm_wins_over_a_frontend_build_package_json(self):
+        plan = detect.detect_repo(_tree({"pom.xml": POM_SPRING, "package.json": PKG_VITEST}))
+        self.assertEqual(plan["stack"], "jvm")
+
+
+class JvmModuleTests(unittest.TestCase):
+    def test_spring_package_children_are_modules(self):
+        root = _tree({
+            "pom.xml": POM_SPRING,
+            "src/main/java/com/acme/shop/ShopApplication.java": "x",
+            "src/main/java/com/acme/shop/orders/OrderController.java": "x",
+            "src/main/java/com/acme/shop/billing/Invoice.java": "x",
+            "src/main/resources/application.yml": "x",
+            "src/test/java/com/acme/shop/orders/OrderTest.java": "x",
+        })
+        self.assertEqual(detect.detect_modules(root), [
+            "src/main/java/com/acme/shop/.", "src/main/java/com/acme/shop/billing",
+            "src/main/java/com/acme/shop/orders", "src/main/resources"])
+
+    def test_kotlin_multi_module_gradle(self):
+        root = _tree({
+            "settings.gradle.kts": 'include("api", "core")\n', "build.gradle.kts": GRADLE_KTS_SPRING,
+            "api/build.gradle.kts": "x", "api/src/main/kotlin/io/acme/api/web/Routes.kt": "x",
+            "core/build.gradle.kts": "x", "core/src/main/kotlin/io/acme/core/domain/Order.kt": "x",
+            "core/src/main/kotlin/io/acme/core/Core.kt": "x",
+        })
+        self.assertEqual(detect.detect_modules(root), [
+            "api/src/main/kotlin/io/acme/api/web", "core/src/main/kotlin/io/acme/core/.",
+            "core/src/main/kotlin/io/acme/core/domain"])
 
 
 class ToolAndWorkerTests(unittest.TestCase):

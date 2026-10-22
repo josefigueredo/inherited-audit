@@ -116,7 +116,76 @@ class ParseSummaryTest(unittest.TestCase):
         self.assertEqual((r["passed"], r["failed"], r["total"]), (4, 1, 5))
 
 
+SUREFIRE = ('<?xml version="1.0" encoding="UTF-8"?>\n<testsuite name="com.acme.OrderTest" tests="{t}" failures="{f}" '
+            'errors="{e}" skipped="{s}"><testcase name="a"/></testsuite>\n')
+
+
+class JunitAndJvmTextTest(unittest.TestCase):
+    def write(self, files):
+        return write_tree(make_dir(), files)
+
+    def test_sums_every_report_matching_the_globs(self):
+        root = self.write({
+            "target/surefire-reports/TEST-a.xml": SUREFIRE.format(t=5, f=1, e=1, s=1),
+            "core/target/surefire-reports/TEST-b.xml": SUREFIRE.format(t=3, f=0, e=0, s=0),
+            "target/surefire-reports/other.xml": SUREFIRE.format(t=99, f=0, e=0, s=0),
+        })
+        r = bl.parse_junit(root, ["**/target/surefire-reports/TEST-*.xml"])
+        self.assertEqual((r["passed"], r["failed"], r["total"], r["runner"], r["files"]), (5, 2, 7, "junit-xml", 2))
+
+    def test_nested_testsuites_count_only_leaf_suites(self):
+        xml = ('<testsuites tests="4"><testsuite tests="4" failures="1"><testsuite tests="2" failures="1"/>'
+               '<testsuite tests="2"/></testsuite></testsuites>')
+        r = bl.parse_junit(self.write({"r/TEST-x.xml": xml}), ["r/*.xml"])
+        self.assertEqual((r["passed"], r["failed"], r["total"]), (3, 1, 4))
+
+    def test_no_report_is_none(self):
+        self.assertIsNone(bl.parse_junit(self.write({"a.txt": "x"}), ["**/TEST-*.xml"]))
+
+    def test_doctype_and_broken_files_are_refused_not_parsed(self):
+        bomb = ('<?xml version="1.0"?><!DOCTYPE l [<!ENTITY a "aaaa"><!ENTITY b "&a;&a;&a;">]>'
+                '<testsuite tests="&b;"/>')
+        root = self.write({"r/TEST-bomb.xml": bomb, "r/TEST-broken.xml": "<testsuite",
+                           "r/TEST-ok.xml": SUREFIRE.format(t=2, f=0, e=0, s=0)})
+        r = bl.parse_junit(root, ["r/*.xml"])
+        self.assertEqual((r["passed"], r["total"], r["files"]), (2, 2, 1))
+        self.assertEqual(sorted(r["skipped_files"]), ["r/TEST-bomb.xml", "r/TEST-broken.xml"])
+
+    def test_maven_text_summary_sums_every_module(self):
+        text = ("[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.1 s -- in a.ATest\n"
+                "[INFO] Results:\n[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0\n"
+                "[ERROR] Tests run: 5, Failures: 1, Errors: 1, Skipped: 1\n[INFO] BUILD SUCCESS\n")
+        r = bl.parse_summary(text)
+        self.assertEqual((r["passed"], r["failed"], r["total"], r["runner"]), (4, 2, 6, "maven"))
+
+    def test_junit_globs_can_be_set_in_the_plan(self):
+        run, _, _ = make_run()
+        ok = run_cli(["baseline", "--run", str(run), "--set", "BACK", 'junit=["build/test-results/**/*.xml"]'])
+        self.assertEqual(ok.returncode, 0, ok.stderr)
+        self.assertEqual(runmod.load(run)["baseline"]["BACK"]["plan"]["junit"], ["build/test-results/**/*.xml"])
+        for bad in ('junit="x.xml"', 'junit=["/abs/*.xml"]', 'junit=["../x/*.xml"]'):
+            self.assertEqual(run_cli(["baseline", "--run", str(run), "--set", "BACK", bad]).returncode, 2, bad)
+
+    def test_gradle_text_summary(self):
+        r = bl.parse_summary("> Task :test FAILED\n\n7 tests completed, 2 failed, 1 skipped\n\nBUILD FAILED in 3s\n")
+        self.assertEqual((r["passed"], r["failed"], r["total"], r["runner"]), (4, 2, 6, "gradle"))
+
+
 class RunBaselineTest(unittest.TestCase):
+    def test_junit_reports_written_by_the_suite_give_the_counts(self):
+        write = ("import os\nos.makedirs('target/surefire-reports')\n"
+                 f"open('target/surefire-reports/TEST-a.xml', 'w').write({SUREFIRE.format(t=4, f=1, e=0, s=0)!r})\n"
+                 "print('BUILD SUCCESS')\n")
+        run, _, _ = make_run(test_cmd=[sys.executable, "-c", write], junit=["**/target/surefire-reports/TEST-*.xml"])
+        result = bl.run_baseline(run, "BACK", 60)
+        self.assertEqual((result["passed"], result["failed"], result["total"], result["runner"]), (3, 1, 4, "junit-xml"))
+        self.assertTrue(result["parsed"])
+
+    def test_junit_without_reports_falls_back_to_the_text(self):
+        run, _, _ = make_run(junit=["**/target/surefire-reports/TEST-*.xml"])
+        result = bl.run_baseline(run, "BACK", 60)
+        self.assertEqual((result["passed"], result["runner"]), (1, "unittest"))
+
     def test_runs_in_worktree_not_user_checkout(self):
         run, repo, sha = make_run()
         before = git(repo, "rev-parse", "HEAD")

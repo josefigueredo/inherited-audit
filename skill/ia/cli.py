@@ -181,7 +181,8 @@ def _detect_locked(args: argparse.Namespace) -> int:
         names += [n for n in plan["measure"] if n not in names]
         hint = (f"  (suggested install, ask first: {' '.join(plan['install_cmd'])})"
                 if plan["deps"] == "none" and plan.get("install_cmd") else "")
-        print(f"{repo['alias']}: {plan['stack']}  test: {' '.join(plan['test_cmd']) if plan['test_cmd'] else '-'}"
+        stack = plan["stack"] + (f" ({plan['framework']})" if plan.get("framework") else "")
+        print(f"{repo['alias']}: {stack}  test: {' '.join(plan['test_cmd']) if plan['test_cmd'] else '-'}"
               f"  deps: {plan['deps']}{hint}" + ("" if plan["measured"] else "  (unmeasured stack)"))
     old_modules = manifest.get("modules") if isinstance(manifest.get("modules"), dict) else {}
     kept = [a for a in manifest.get("modules_edited") or [] if isinstance(a, str) and old_modules.get(a)]
