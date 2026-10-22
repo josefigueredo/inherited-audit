@@ -163,11 +163,8 @@ def _path(run: Path, fid: str) -> Path:
 
 
 def _write(run: Path, f: dict) -> None:
-    folder = _folder(run)
-    folder.mkdir(parents=True, exist_ok=True)
-    tmp = folder / f"{f['id']}.json.tmp"
-    tmp.write_text(json.dumps(f, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    os.replace(tmp, _path(run, f["id"]))
+    _folder(run).mkdir(parents=True, exist_ok=True)
+    runmod.atomic_write(_path(run, f["id"]), json.dumps(f, indent=2, ensure_ascii=False) + "\n")
 
 
 def _read(path: Path) -> dict:
@@ -235,16 +232,17 @@ def add(run: Path, f: dict) -> str:
     if not isinstance(f, dict):
         raise FindingError(["finding must be a JSON object"])
     f = copy.deepcopy(f)
-    if _blank(f.get("id")):
-        prefix = PREFIX.get(f.get("report"))
-        f["id"] = _next_id(run, prefix) if prefix else ""
-    filled = mask_prose(_fill(f))
-    problems = validate(filled)
-    if not problems and _path(run, filled["id"]).exists():
-        problems.append(f"id: {filled['id']} already exists")
-    if problems:
-        raise FindingError(problems)
-    _write(run, filled)
+    with runmod.run_lock(run):  # the id is picked and its file written under one lock
+        if _blank(f.get("id")):
+            prefix = PREFIX.get(f.get("report"))
+            f["id"] = _next_id(run, prefix) if prefix else ""
+        filled = mask_prose(_fill(f))
+        problems = validate(filled)
+        if not problems and _path(run, filled["id"]).exists():
+            problems.append(f"id: {filled['id']} already exists")
+        if problems:
+            raise FindingError(problems)
+        _write(run, filled)
     return filled["id"]
 
 
@@ -260,7 +258,14 @@ def load_all(run: Path) -> List[dict]:
 
 
 def update(run: Path, fid: str, changes: dict) -> dict:
+    with runmod.run_lock(run):
+        return _update(run, fid, changes)
+
+
+def _update(run: Path, fid: str, changes: dict) -> dict:
     path = _path(run, fid)
+    if not ID_RE.match(fid or ""):
+        raise FindingError([f"{fid!r} is not a finding id (C-01, Q-01)"])
     if not path.is_file():
         raise FindingError([f"no finding {fid} in {run}"])
     f = _read(path)

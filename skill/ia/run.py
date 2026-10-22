@@ -1,14 +1,17 @@
 """The run manifest: the resumable state every ia command reads."""
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import os
 import re
 import sys
 import subprocess
+import tempfile
 from datetime import date
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 
 STEPS: Tuple[str, ...] = ("baseline", "correctness", "proof", "tests", "quality", "contrast", "verify", "filter",
                           "prose", "hygiene", "render")
@@ -29,6 +32,55 @@ class UsageError(RunError):
 
 class ToolError(RunError):
     """An external tool failed or is missing (exit 3)."""
+
+
+LOCK_NAME = ".ia.lock"
+_HELD: Dict[str, int] = {}
+
+
+@contextlib.contextmanager
+def run_lock(run: Path) -> Iterator[None]:
+    """Exclusive lock on the run dir for a read-modify-write: parallel subagents call ia on the same run.
+
+    Reentrant inside one process (flock on a second descriptor of the same file would block on itself).
+    """
+    key = str(Path(run).resolve())
+    if _HELD.get(key):
+        _HELD[key] += 1
+        try:
+            yield
+        finally:
+            _HELD[key] -= 1
+        return
+    path = Path(key) / LOCK_NAME
+    try:
+        fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError as exc:
+        raise RunError(f"cannot lock the run dir {key}: {exc}")
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        _HELD[key] = 1
+        try:
+            yield
+        finally:
+            _HELD.pop(key, None)
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+def atomic_write(path: Path, text: str) -> None:
+    """Writes through a tmp file unique to this writer, then renames it over `path`."""
+    path = Path(path)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, str(path))
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
 
 
 def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
