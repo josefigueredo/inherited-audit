@@ -13,6 +13,10 @@ Corre `./install.sh`, que enlaza solo la carpeta `skill/` en `~/.claude/skills/i
 sirve para los dos hosts: Cursor también lee `~/.claude/skills` por compatibilidad. Por eso el instalador no escribe
 nada en `~/.agents/skills`: Cursor vería la skill dos veces.
 
+Si solo usás Cursor, pedile *«Instalá la skill inherited-audit solo para Cursor»*: corre `./install.sh --cursor`, que la
+enlaza en `~/.cursor/skills/inherited-audit` en vez de `~/.claude/skills`. Va en una de las dos carpetas, nunca en las
+dos: si encuentra la otra, no enlaza nada, avisa que Cursor la cargaría dos veces y sale con 1.
+
 Si una sesión que ya estaba abierta no encuentra la skill, cerrala y abrila de nuevo.
 
 ## 2. Auditar desde Claude Code
@@ -55,7 +59,8 @@ La skill no los necesita: lanza un subagente genérico con la ruta de la pasada.
 > *«Instalá inherited-audit con los subagentes opcionales»*
 
 Corre `./install.sh --agents`, que además enlaza `ia-auditor` en `~/.claude/agents/` (Claude Code) y en
-`~/.cursor/agents/` (Cursor). En Cursor es de solo lectura, para las pasadas de análisis.
+`~/.cursor/agents/` (Cursor). Con `--cursor --agents`, solo en `~/.cursor/agents/`. En Cursor es de solo lectura, para
+las pasadas de análisis.
 
 ## Si algo falla
 
@@ -65,7 +70,7 @@ Corre `./install.sh --agents`, que además enlaza `ia-auditor` en `~/.claude/age
 | `init` no arranca porque un repo tiene cambios | Commitealos o guardalos aparte (el agente te pregunta antes) |
 | `init` dice que la carpeta de salida se puede commitear | Pedile otra carpeta, fuera de cualquier repo: los reportes llevan hallazgos de seguridad |
 | `cite-check` marca una cita | El hallazgo cita un archivo o unas líneas que no existen en el commit fijado; el agente lo corrige antes de armar los reportes |
-| La skill aparece dos veces en Cursor | Hay otra copia en `~/.agents/skills/inherited-audit` o en el proyecto; dejá solo la de `~/.claude/skills` |
+| La skill aparece dos veces en Cursor | Hay otra copia en `~/.agents/skills/inherited-audit` o en el proyecto, o está en `~/.claude/skills` y en `~/.cursor/skills`; dejá una sola |
 
 ## De dónde sale cada captura
 
