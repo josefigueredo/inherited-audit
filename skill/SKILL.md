@@ -207,8 +207,11 @@ python3 <skill-dir>/ia.py step --run <run-dir> correctness in_progress
      again.
   5. `detect` also records `manifest.modules`: the modules of each repo (the folders under `src/modules`,
      `src/features`, `src/app`, `app`, `src/components`, and every other folder of `src/`). Steps 1 and 2 are
-     closed against them (see "Coverage map" below); if the inventory shows modules `detect` missed, fix that before
-     step 1.
+     closed against them (see "Coverage map" below). If the inventory shows that `detect` cut the modules wrong
+     (missed some, or one module is really several), replace that alias's list before step 1:
+     `ia.py set --run <run-dir> 'modules.<ALIAS>=["internal/orders","internal/billing","cmd/api"]'`. Each path is a
+     directory at the pinned base, relative to the alias root (`<dir>/.` for the files directly in a directory); a
+     later `detect` keeps the list (`manifest.modules_edited`).
   6. Run the baseline-inventory pass: modules, entry points, external dependencies, data stores. From it, choose the
      categories and record their order, and note real strengths, with `ia.py set` (never edit `manifest.json` by
      hand): `ia.py set --run <run-dir> 'sections.correctness=["auth","orders"]' 'sections.quality=["api"]'

@@ -422,6 +422,37 @@ _TESTS_BRANCH = re.compile(r"^baseline\.([^.]+)\.tests_branch$")
 _RESULT_KEY = re.compile(r"^baseline\.([^.]+)\.result\.(passed|failed|total|coverage|runner|measured)$")
 _STRING_KEYS = ("lang", "author_model")
 _WORKER_AVAILABLE = re.compile(r"^workers\.([^.]+)\.([^.]+)\.(.+)\.available$")
+_MODULES = re.compile(r"^modules\.([^.]+)$")
+
+
+def _module_problem(repo: dict, module: object) -> Optional[str]:
+    """Why `module` cannot be a module of `repo` (a directory at the pinned base, relative to the alias root;
+    `.` or `<dir>/.` is the pseudo-module of the files sitting directly in that directory), or None."""
+    if not isinstance(module, str) or not module.strip():
+        return "a module is a non-empty string"
+    if module.startswith("/") or ".." in module.split("/"):
+        return f"{module!r} must be a path relative to the alias root, without '..'"
+    folder = module[:-2] if module.endswith("/.") else ("" if module == "." else module)
+    target = "/".join(p for p in ((repo.get("subdir") or "").strip("/"), folder.strip("/")) if p)
+    kind = _git(Path(repo["path"]), "cat-file", "-t", f"{repo['sha']}:{target}", check=False)
+    if kind.returncode != 0 or kind.stdout.strip() != "tree":
+        return f"{module!r} is not a directory of {repo['alias']} at {repo['sha'][:7]}"
+    return None
+
+
+def _check_modules(manifest: dict, alias: str, value: object) -> List[str]:
+    repo = next((r for r in manifest.get("repos") or [] if r.get("alias") == alias), None)
+    if repo is None:
+        raise UsageError(f"unknown alias {alias!r}; expected one of "
+                         f"{', '.join(r['alias'] for r in manifest.get('repos') or [])}")
+    if not isinstance(value, list) or not value:
+        raise UsageError(f"modules.{alias} must be a non-empty JSON list of paths, e.g. '[\"internal/orders\"]'")
+    if len(set(map(str, value))) != len(value):
+        raise UsageError(f"modules.{alias} lists a module twice")
+    problems = [p for p in (_module_problem(repo, m) for m in value) if p]
+    if problems:
+        raise UsageError(f"modules.{alias}: " + "; ".join(problems))
+    return sorted(value)
 
 
 def _count(v: object) -> bool:
@@ -499,6 +530,7 @@ def parse_set_pairs(manifest: dict, pairs: List[str]) -> List[Tuple[str, object]
             raise UsageError(f"set expects KEY=VALUE, got {pair!r}")
         m, rm = _TESTS_BRANCH.match(key), _RESULT_KEY.match(key)
         wm = _WORKER_AVAILABLE.match(key)
+        mm = _MODULES.match(key)
         if key in _STRING_KEYS or bool(m) or (rm and rm.group(2) == "runner"):
             value: object = raw  # string-typed: never JSON-parsed, so tests_branch=2024 stays "2024"
         else:
@@ -510,6 +542,8 @@ def parse_set_pairs(manifest: dict, pairs: List[str]) -> List[Tuple[str, object]
             _check_worker_row(manifest, wm.group(1), wm.group(2), wm.group(3))
             if not isinstance(value, bool):
                 raise UsageError(f"{key} must be true or false, got {raw!r}")
+        elif mm:
+            value = _check_modules(manifest, mm.group(1), value)
         elif m:
             if m.group(1) not in aliases:
                 raise UsageError(f"unknown alias {m.group(1)!r}; expected one of {', '.join(aliases)}")
@@ -528,7 +562,7 @@ def parse_set_pairs(manifest: dict, pairs: List[str]) -> List[Tuple[str, object]
         else:
             raise UsageError(f"{key!r} cannot be set; settable keys: {', '.join(SETTABLE)}, "
                              "baseline.<ALIAS>.tests_branch, baseline.<ALIAS>.result.passed|failed|total|coverage|runner|measured, "
-                             "workers.<host>.<step>.<worker>.available "
+                             "workers.<host>.<step>.<worker>.available, modules.<ALIAS> "
                              "(plan keys: `ia.py baseline --set`)")
         out.append((key, value))
     return out
@@ -558,6 +592,13 @@ def _set_keys(manifest: dict, pairs: List[str]) -> List[str]:
                 result = entry["result"] = {}
             result[rm.group(2)] = value
             result["source"] = "manual"
+        elif _MODULES.match(key):
+            alias = _MODULES.match(key).group(1)
+            if not isinstance(manifest.get("modules"), dict):
+                manifest["modules"] = {}
+            manifest["modules"][alias] = value
+            edited = [a for a in manifest.get("modules_edited") or [] if isinstance(a, str)]
+            manifest["modules_edited"] = edited + ([alias] if alias not in edited else [])
         elif "." in key:
             head, tail = key.split(".", 1)
             manifest.setdefault(head, {})[tail] = value

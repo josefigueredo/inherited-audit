@@ -305,6 +305,54 @@ class StepGuardTest(unittest.TestCase):
         self.assertEqual(res.stderr, "")
 
 
+class SetModulesTest(unittest.TestCase):
+    def set_(self, out, value):
+        return run_cli(["set", "--run", str(out), f"modules.BACK={value}"])
+
+    def test_set_replaces_the_modules_of_an_alias_sorted(self):
+        out = new_run()
+        res = self.set_(out, '["src/modules/users", "src/modules", "src/."]')
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(runmod.load(out)["modules"]["BACK"], ["src/.", "src/modules", "src/modules/users"])
+        self.assertIn("BACK/src/modules", coverage.modules_of(runmod.load(out)))
+
+    def test_paths_must_be_directories_at_the_pinned_base(self):
+        out = new_run()
+        for bad in ('["src/nope"]', '["src/lib/c.ts"]', '["../x"]', '["/abs"]', '[]', '["a", "a"]', '"src"', '[""]'):
+            res = self.set_(out, bad)
+            self.assertEqual(res.returncode, 2, (bad, res.stderr))
+        self.assertEqual(runmod.load(out)["modules"]["BACK"], MODS_PATHS)
+
+    def test_a_dir_only_in_the_worktree_is_refused(self):
+        out = new_run()
+        repo = Path(runmod.load(out)["repos"][0]["path"])
+        write_tree(repo, {"src/later/x.ts": "x"})
+        self.assertEqual(self.set_(out, '["src/later"]').returncode, 2)
+
+    def test_unknown_alias_is_refused(self):
+        out = new_run()
+        res = run_cli(["set", "--run", str(out), 'modules.NOPE=["src"]'])
+        self.assertEqual(res.returncode, 2)
+        self.assertIn("NOPE", res.stderr)
+
+    def test_detect_keeps_modules_set_by_hand(self):
+        out = new_run()
+        self.assertEqual(self.set_(out, '["src/modules"]').returncode, 0)
+        self.assertEqual(run_cli(["detect", "--run", str(out)]).returncode, 0)
+        manifest = runmod.load(out)
+        self.assertEqual(manifest["modules"]["BACK"], ["src/modules"])
+        self.assertEqual(manifest["modules_edited"], ["BACK"])
+
+    def test_subdir_alias_paths_are_relative_to_the_subdir(self):
+        files = {(k if k == ".gitignore" else f"api/{k}"): v for k, v in FILES.items()}
+        out = new_run(files, subdir="api")
+        self.assertEqual(self.set_(out, '["src/lib"]').returncode, 0)
+        self.assertEqual(self.set_(out, '["api/src/lib"]').returncode, 2)
+
+
+MODS_PATHS = ["src/lib", "src/modules/orders", "src/modules/users"]
+
+
 class NotApplicableTest(unittest.TestCase):
     def test_not_applicable_needs_a_note(self):
         out = new_run()
@@ -368,6 +416,10 @@ class DocsTest(unittest.TestCase):
         text = self.read("SKILL.md")
         for needle in ("ia.py coverage add", "ia.py coverage status", "--force-open", "--topics", "`n/a`"):
             self.assertIn(needle, text)
+
+    def test_setting_modules_is_documented(self):
+        self.assertIn("ia.py set --run <run-dir> 'modules.<ALIAS>=", self.read("SKILL.md"))
+        self.assertIn("`modules_edited`", self.read("references/schema.md"))
 
     def test_not_applicable_is_documented_wherever_results_are(self):
         for rel in ("references/checklist.md", "references/schema.md", "references/passes/races-distributed.md"):
