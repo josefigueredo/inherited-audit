@@ -15,7 +15,7 @@
 <span class="o">  [claude-code] static: osv-scanner  -&gt;  brew install osv-scanner  (fallback: references/passes/supply-chain-container.md)</span>
 <span class="p">$</span> <span class="k">python3 ~/.claude/skills/inherited-audit/ia.py baseline --run tienda-inherited-audit/2026-10-18</span>
 <span class="o">SHOP: unittest  passed: 2  failed: 0  total: 2  exit: 0  output: outputs/baseline-SHOP.txt</span>
-<span class="c"># Los obreros cargan sus candidatos en el esquema común</span>
+<span class="c"># Los workers cargan sus candidatos en el esquema común</span>
 <span class="p">$</span> <span class="k">for f in c-01 c-02 q-01; do python3 ~/.claude/skills/inherited-audit/ia.py finding add --run tienda-inherited-audit/2026-10-18 $f.json; done</span>
 <span class="o">C-01</span>
 <span class="o">C-02</span>

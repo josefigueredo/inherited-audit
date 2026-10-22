@@ -7,7 +7,7 @@ acá están para que veas qué hace cada uno.
 
 - `python3` 3.9 o más. `ia.py` usa solo la biblioteca estándar.
 - `git` 2.38 o más (`merge-check` usa `git merge-tree --write-tree`).
-- Claude Code, Cursor o los dos. Los obreros externos (semgrep, gitleaks, trivy, osv-scanner, los plugins de cada host)
+- Claude Code, Cursor o los dos. Los workers externos (semgrep, gitleaks, trivy, osv-scanner, los plugins de cada host)
   son opcionales; la tabla completa con sus comandos de instalación está en
   [`skill/references/workers.md`](../skill/references/workers.md).
 
@@ -42,7 +42,7 @@ si el instalador encuentra la skill en la otra carpeta, no enlaza nada, lo avisa
 
 ## 3. En qué host está corriendo
 
-La skill le pasa el host a `ia.py init --host`, y con eso elige la fila de obreros. Medido el 2026-10-18 sobre el
+La skill le pasa el host a `ia.py init --host`, y con eso elige la fila de workers. Medido el 2026-10-18 sobre el
 entorno que cada host le da a los comandos:
 
 | Variable | Quién la pone |
@@ -57,12 +57,12 @@ Primero `CURSOR_AGENT`, después `CLAUDECODE`; si no está ninguna, el agente te
 Las capturas de esta guía y del showcase salen de `tienda`, un repo de juguete con un bug a propósito, armado por
 [`img/src/demo/setup.sh`](img/src/demo/setup.sh) dentro de un `HOME` de prueba.
 
-![Terminal: init fija el commit, detect lista los obreros que faltan, baseline mide la suite y status muestra los pasos](img/terminal-corrida.png)
+![Terminal: init fija el commit, detect lista los workers que faltan, baseline mide la suite y status muestra los pasos](img/terminal-corrida.png)
 
 | Comando | Qué hace |
 |---|---|
 | `init --system <nombre> --repo ALIAS=RUTA[:SUBCARPETA] --host <host>` | Crea la corrida (por defecto `<carpeta que contiene la raíz git del primer repo>/<sistema>-inherited-audit/<fecha>/`) y fija el `HEAD` de cada repo. El nombre del sistema va en nombres de archivo: letras, números, `.`, `_` y `-`, empezando por letra o número. `--repo` se repite; el alias es con lo que empieza cada cita. Opcionales: `--publish`, `--lang`, `--out` |
-| `detect --run <corrida>` | Stack (TypeScript/JavaScript, Python, Java/Kotlin con Maven o Gradle, Go), comando de tests y dependencias de cada repo, y los obreros que faltan en este host con su comando de instalación. Propone `deps: none` salvo que la carpeta de dependencias ya exista y coincida con el lockfile; la instalación queda como sugerencia y se pregunta. Lo que se baja con `npx` va aparte: siempre se pregunta |
+| `detect --run <corrida>` | Stack (TypeScript/JavaScript, Python, Java/Kotlin con Maven o Gradle, Go), comando de tests y dependencias de cada repo, y los workers que faltan en este host con su comando de instalación. Propone `deps: none` salvo que la carpeta de dependencias ya exista y coincida con el lockfile; la instalación queda como sugerencia y se pregunta. Lo que se baja con `npx` va aparte: siempre se pregunta |
 | `baseline --run <corrida>` | Corre cada suite en el commit fijado, en un worktree descartable, y guarda la salida cruda en `outputs/`. Los números salen del comando de tests; la cobertura, de un paso aparte que si falla no los pierde |
 | `finding add --run <corrida> <archivo.json>` | Valida un hallazgo contra el esquema y le asigna id (`C-NN` correctitud, `Q-NN` calidad) |
 | `status --run <corrida>` | Cada paso con su estado y cuál sigue: así se retoma |

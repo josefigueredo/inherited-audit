@@ -22,9 +22,9 @@ tope, así que con un cupón de 150% un carrito de 100 da -50.
 
 | | |
 |---|---|
-| **Director de obra, no obrero** | La skill tiene el checklist, el orden y los criterios de aceptación. El trabajo lo hacen las skills del host o externas; donde no hay nada bueno (por ejemplo, condiciones de carrera y sistemas distribuidos), trae su propia pasada |
+| **Dirige la obra, no la construye** | La skill tiene el checklist, el orden y los criterios de aceptación. El trabajo lo hacen las skills del host o externas; donde no hay nada bueno (por ejemplo, condiciones de carrera y sistemas distribuidos), trae su propia pasada |
 | **Rojo por la razón correcta** | Cada hallazgo de código tiene una rama local con un commit de solo tests que falla una aserción en el commit fijado. Un import roto o un error de setup no cuenta |
-| **Igual en Claude Code y en Cursor** | Una sola carpeta instalada sirve para los dos; cada paso tiene su obrero en cada host y la corrida se retoma en cualquiera |
+| **Igual en Claude Code y en Cursor** | Una sola carpeta instalada sirve para los dos; cada paso tiene su worker en cada host y la corrida se retoma en cualquiera |
 | **Se puede retomar** | Todo el estado vive en la carpeta de la corrida (`manifest.json` y un archivo por hallazgo), fuera de los repos auditados |
 | **Pensado para el equipo dueño** | Filtro con regla explícita, «se muestran N de M», prosa sin jerga ni culpas, y una segunda mirada de otro modelo antes del filtro |
 
@@ -35,9 +35,9 @@ tope, así que con un cupón de 150% un carrito de 100 da -50.
 **Componente:** `inherited-audit` + `ia.py` · **Escribe:** la carpeta de la corrida, al lado del primer repo.
 
 Le decís *«Auditá el sistema tienda: el código está en ~/demo/tienda»*. El agente detecta el host, crea la corrida,
-fija el commit, mide la suite y te pregunta una sola vez por los obreros que faltan.
+fija el commit, mide la suite y te pregunta una sola vez por los workers que faltan.
 
-![Terminal: init fija el commit, detect lista los obreros que faltan, baseline mide la suite y status muestra los pasos](img/terminal-corrida.png)
+![Terminal: init fija el commit, detect lista los workers que faltan, baseline mide la suite y status muestra los pasos](img/terminal-corrida.png)
 
 *Salida real sobre el repo de prueba.*
 
@@ -46,7 +46,7 @@ fija el commit, mide la suite y te pregunta una sola vez por los obreros que fal
 | Un repo tiene cambios sin commitear | `init` sale con 1 y lista los archivos: el commit fijado tiene que coincidir con lo que se lee |
 | La carpeta de salida queda dentro de un repo y git la podría commitear | `init` sale con 1: los reportes llevan hallazgos de seguridad |
 | Ya hay una corrida en esa carpeta | `init` sale con 1 y te dice cómo retomarla |
-| Falta un obrero | Se pregunta una vez, con el comando exacto; si no lo instalás, lo cubre una pasada propia toda la corrida |
+| Falta un worker | Se pregunta una vez, con el comando exacto; si no lo instalás, lo cubre una pasada propia toda la corrida |
 
 ![Terminal: init rechaza un repo con cambios, una salida commiteable y una corrida que ya existe](img/terminal-rechazos.png)
 
@@ -57,7 +57,7 @@ fija el commit, mide la suite y te pregunta una sola vez por los obreros que fal
 **Componente:** `ia.py` (`finding add`, `finding set`, `merge-check`) · **Escribe:** una rama local por hallazgo, sin
 upstream, en el repo auditado.
 
-Cada obrero carga sus candidatos en un esquema común. Después, un subagente por candidato, en su propio worktree, crea
+Cada worker carga sus candidatos en un esquema común. Después, un subagente por candidato, en su propio worktree, crea
 la rama con un commit de solo tests. En `tienda`, el test falla porque `total()` devuelve -50.0: es una aserción sobre
 el código de la base, no un error de setup.
 
@@ -109,7 +109,7 @@ Le decís *«Retomá la auditoría de tienda»*, en Claude Code o en Cursor. El 
 primer paso que no está hecho y lee del manifest las opciones que elegiste, sin volver a preguntarlas. Para saber en
 qué host está mira primero `CURSOR_AGENT` y después `CLAUDECODE` (medido el 2026-10-18: el agente de Cursor puede
 heredar `CLAUDECODE` de un proceso padre). Si cambió el host, lo anota con `ia.py set host=…`, vuelve a correr
-`ia.py detect` (que respeta lo que corregiste del plan) y desde ahí usa los obreros del nuevo.
+`ia.py detect` (que respeta lo que corregiste del plan) y desde ahí usa los workers del nuevo.
 
 | Situación | Resultado |
 |---|---|
