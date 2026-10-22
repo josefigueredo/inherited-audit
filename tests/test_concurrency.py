@@ -103,5 +103,20 @@ class ParallelManifestTest(unittest.TestCase):
         self.assertEqual((m["steps"]["proof"], m["steps"]["tests"]), ("in_progress", "skipped"))
 
 
+class NotARunTest(unittest.TestCase):
+    def test_writing_commands_leave_a_dir_without_manifest_untouched(self):
+        target = make_dir()
+        (target / "keep.txt").write_text("x", encoding="utf-8")
+        cmds = [["finding", "set", "--run", str(target), "C-01", "reason=x"],
+                ["set", "--run", str(target), "host=cursor"],
+                ["step", "--run", str(target), "proof", "done"],
+                ["coverage", "add", "--run", str(target), "--pass", "security", "--module", "BACK/src",
+                 "--result", "nothing"]]
+        for r in parallel(cmds):
+            self.assertEqual(r.returncode, 1, r.stderr)
+            self.assertIn("no manifest.json", r.stderr)
+        self.assertEqual(sorted(p.name for p in target.iterdir()), ["keep.txt"])
+
+
 if __name__ == "__main__":
     unittest.main()

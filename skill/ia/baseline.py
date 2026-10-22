@@ -102,15 +102,19 @@ class _Chunks:
         return b"".join(self.parts).decode("utf-8", errors="replace")
 
 
-def _exec(cmd: List[str], cwd: Path, env: Dict[str, str], deadline: float) -> Tuple[Optional[int], bytes, bool]:
+def _exec(cmd: List[str], cwd: Path, env: Dict[str, str], deadline: float,
+          groups: Optional[List[int]] = None) -> Tuple[Optional[int], bytes, bool]:
     """Runs one command in its own process group; returns (exit code, merged output, timed out).
 
     The output goes to a temp file, not a pipe: a grandchild that left the group (its own session, a daemon) can
     keep a pipe open forever, and reading it to EOF would ignore both the command's exit and the deadline.
+    The group id goes into `groups`, so the caller can stop what the command left running in the background.
     """
     with tempfile.TemporaryFile() as sink:
         proc = subprocess.Popen(cmd, cwd=str(cwd), env=env, stdout=sink, stderr=subprocess.STDOUT,
                                 stdin=subprocess.DEVNULL, start_new_session=True)
+        if groups is not None:
+            groups.append(proc.pid)
         try:
             code: Optional[int] = proc.wait(timeout=max(deadline - time.monotonic(), 0.1))
             expired = False
@@ -130,6 +134,15 @@ def _kill_group(proc: subprocess.Popen) -> None:
     except (ProcessLookupError, PermissionError):
         proc.kill()
     proc.wait()
+
+
+def _stop_groups(groups: List[int]) -> None:
+    """Stops whatever the repo's commands left running in their groups (a `pre` server, a `cmd &`)."""
+    for pgid in groups:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
 
 
 def _worktree_cwd(repo_path: Path, subdir: str, wt: Path) -> Path:
@@ -171,11 +184,11 @@ def _repo_and_plan(manifest: dict, alias: str) -> Tuple[dict, dict]:
 
 
 def _run_coverage(cmd: List[str], cwd: Path, env: Dict[str, str], deadline: float, timeout: int,
-                  chunks: _Chunks) -> Tuple[Optional[float], str]:
+                  chunks: _Chunks, groups: Optional[List[int]] = None) -> Tuple[Optional[float], str]:
     """Runs the coverage command as a separate, non-fatal step: (coverage %, error or "")."""
     label = " ".join(cmd)
     try:
-        code, out, expired = _exec(cmd, cwd, env, deadline)
+        code, out, expired = _exec(cmd, cwd, env, deadline, groups)
     except OSError as exc:  # missing, not executable, wrong format: the command never ran
         error = f"could not start `{label}`: {exc}"
         chunks.add(label, (error + "\n").encode("utf-8"))
@@ -215,6 +228,7 @@ def run_baseline(run: Path, alias: str, timeout: int) -> dict:
     suite_text = ""
     coverage: Optional[float] = None
     coverage_error = ""
+    groups: List[int] = []
     try:
         runmod._git(repo_path, "worktree", "add", "--detach", str(wt), repo["sha"])
         added = True
@@ -229,7 +243,7 @@ def run_baseline(run: Path, alias: str, timeout: int) -> dict:
         steps.append(("suite", list(test_cmd)))
         for kind, cmd in steps:
             try:
-                code, out, expired = _exec(cmd, cwd, env, deadline)
+                code, out, expired = _exec(cmd, cwd, env, deadline, groups)
             except OSError as exc:  # missing, not executable, wrong format: the command never ran
                 error = f"could not start `{' '.join(cmd)}`: {exc}"
                 chunks.add(" ".join(cmd), (error + "\n").encode("utf-8"))
@@ -250,10 +264,11 @@ def run_baseline(run: Path, alias: str, timeout: int) -> dict:
         if ran_suite and cov_cmd:
             counts = parse_summary(suite_text)
             if counts["failed"] == 0 and counts["total"] is not None:
-                coverage, coverage_error = _run_coverage(cov_cmd, cwd, env, deadline, timeout, chunks)
+                coverage, coverage_error = _run_coverage(cov_cmd, cwd, env, deadline, timeout, chunks, groups)
             else:
                 coverage_error = "skipped: suite failing"
     finally:
+        _stop_groups(groups)  # after suite and coverage, so a `pre` server lives as long as they need it
         if added:
             subprocess.run(["git", "worktree", "remove", "--force", str(wt)], cwd=str(repo_path),
                            capture_output=True, stdin=subprocess.DEVNULL)

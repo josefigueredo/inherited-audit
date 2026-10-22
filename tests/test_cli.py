@@ -4,9 +4,11 @@ import argparse
 import contextlib
 import io
 import json
+import subprocess
+import sys
 import unittest
 
-from helpers import make_dir, make_git_repo, run_cli
+from helpers import SKILL, make_dir, make_git_repo, run_cli
 
 from ia import cli, run as runmod
 
@@ -61,6 +63,13 @@ class CliTest(unittest.TestCase):
         repo, _ = make_git_repo({"a.txt": "x\n"})
         run = runmod.init_run("sys", [("BACK", repo, "")], make_dir() / "run", "es", False, "unknown")
         self.assertEqual(run_cli(["finding", "add", "--run", str(run), str(make_dir() / "nope.json")]).returncode, 2)
+
+    def test_imports_without_fcntl_or_sighup(self):
+        """Windows has neither: the CLI must still import (baseline is POSIX-only, the other commands are not)."""
+        code = ("import sys, signal\nsys.modules['fcntl'] = None\ndel signal.SIGHUP\n"
+                f"sys.path.insert(0, {str(SKILL)!r})\nimport ia.cli\nprint(ia.cli.STOP_SIGNALS)")
+        result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_make_git_repo_returns_head_sha(self):
         repo, sha = make_git_repo({"a.txt": "x"}, remote="https://github.com/o/r")

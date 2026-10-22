@@ -488,7 +488,7 @@ def parser() -> argparse.ArgumentParser:
     return p
 
 
-STOP_SIGNALS = (signal.SIGTERM, signal.SIGHUP)
+STOP_SIGNALS = tuple(s for s in (getattr(signal, "SIGTERM", None), getattr(signal, "SIGHUP", None)) if s is not None)
 
 
 def _on_stop(signum: int, _frame: object) -> None:

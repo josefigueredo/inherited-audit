@@ -188,6 +188,33 @@ class RunBaselineTest(unittest.TestCase):
         self.assertFalse(result["timed_out"])
         self.assertEqual((result["passed"], result["total"]), (1, 1))
 
+    def test_background_process_of_the_suite_does_not_outlive_baseline(self):
+        pidfile = make_dir() / "pid"
+        self.addCleanup(_kill_pidfile, pidfile)
+        run, _, _ = make_run(test_cmd=["sh", "-c", f"sleep 30 & echo $! > '{pidfile}'; "
+                                                   "echo 'Ran 1 test in 0.0s'; echo OK"])
+        result = bl.run_baseline(run, "BACK", 60)
+        self.assertEqual(result["passed"], 1)
+        pid = int(pidfile.read_text())
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return
+            time.sleep(0.05)
+        self.fail("the suite's background process outlived baseline")
+
+    def test_a_pre_server_lives_through_the_suite(self):
+        pidfile = make_dir() / "pid"
+        self.addCleanup(_kill_pidfile, pidfile)
+        check = (f"import os, sys\nos.kill(int(open({str(pidfile)!r}).read()), 0)\n"
+                 "print('Ran 1 test in 0.0s'); print('OK')")
+        run, _, _ = make_run(pre=[["sh", "-c", f"sleep 30 > /dev/null 2>&1 & echo $! > '{pidfile}'"]],
+                             test_cmd=[sys.executable, "-c", check])
+        result = bl.run_baseline(run, "BACK", 60)
+        self.assertEqual((result["passed"], result["exit_code"]), (1, 0), result)
+
     def test_timeout_is_kept_with_a_detached_grandchild(self):
         run, repo, _ = make_run(test_cmd=self._detached("import time; time.sleep(60)"))
         started = time.monotonic()
@@ -384,8 +411,11 @@ class BaselineCliTest(unittest.TestCase):
         self.addCleanup(_kill_pidfile, pidfile)
         code = f"import os, time\nopen({str(pidfile)!r}, 'w').write(str(os.getpid()))\ntime.sleep(60)\n"
         run, repo, _ = make_run(test_cmd=[sys.executable, "-c", code])
+        # A shell starts background jobs with SIGINT ignored, and Python keeps an inherited SIG_IGN: give ia the
+        # default disposition a terminal would, so the test does not depend on how the suite itself was launched.
         proc = subprocess.Popen([sys.executable, str(SKILL / "ia.py"), "baseline", "--run", str(run), "--timeout", "120"],
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
         deadline = time.monotonic() + 30
         while not (pidfile.exists() and pidfile.read_text()) and time.monotonic() < deadline:
             time.sleep(0.05)
@@ -414,6 +444,11 @@ class BaselineCliTest(unittest.TestCase):
     def test_sighup_kills_the_suite_and_removes_the_worktree(self):
         code, pid, repo = self._killed_mid_suite(signal.SIGHUP)
         self.assertEqual(code, 128 + signal.SIGHUP)
+        self._assert_cleaned(pid, repo)
+
+    def test_sigint_kills_the_suite_and_removes_the_worktree(self):
+        code, pid, repo = self._killed_mid_suite(signal.SIGINT)
+        self.assertEqual(code, 128 + signal.SIGINT)
         self._assert_cleaned(pid, repo)
 
     def test_set_manual_result_closes_step_with_source_manual(self):

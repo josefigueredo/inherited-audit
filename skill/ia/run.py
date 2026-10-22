@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import json
 import os
 import re
@@ -12,6 +11,15 @@ import tempfile
 from datetime import date
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Tuple
+
+try:
+    import fcntl
+except ImportError:  # Windows: msvcrt byte-range locks instead (only `baseline` is POSIX-only)
+    fcntl = None  # type: ignore[assignment]
+try:
+    import msvcrt
+except ImportError:
+    msvcrt = None  # type: ignore[assignment]
 
 STEPS: Tuple[str, ...] = ("baseline", "correctness", "proof", "tests", "quality", "contrast", "verify", "filter",
                           "prose", "hygiene", "render")
@@ -60,21 +68,46 @@ def run_lock(run: Path) -> Iterator[None]:
         finally:
             _HELD[key] -= 1
         return
+    if not (Path(key) / "manifest.json").is_file():  # never leave a lock file in a dir that is not a run
+        raise RunError(f"no manifest.json in {run}")
     path = Path(key) / LOCK_NAME
     try:
         fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o600)
     except OSError as exc:
         raise RunError(f"cannot lock the run dir {key}: {exc}")
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        _lock_fd(fd)
         _HELD[key] = 1
         try:
             yield
         finally:
             _HELD.pop(key, None)
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            _unlock_fd(fd)
     finally:
         os.close(fd)
+
+
+def _lock_fd(fd: int) -> None:
+    if fcntl is not None:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+    elif msvcrt is not None:
+        while True:  # LK_LOCK gives up after ~10 s; a long writer is no reason to fail
+            os.lseek(fd, 0, os.SEEK_SET)
+            try:
+                msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+                return
+            except OSError:
+                continue
+    else:
+        raise ToolError("no file locking on this platform (neither fcntl nor msvcrt)")
+
+
+def _unlock_fd(fd: int) -> None:
+    if fcntl is not None:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    elif msvcrt is not None:
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
 
 
 def atomic_write(path: Path, text: str) -> None:
@@ -241,7 +274,7 @@ def init_run(system: str, repos: List[Tuple[str, Path, str]], out: Optional[Path
                 "options": {"fix": False, "publish": publish}, "repos": entries,
                 "steps": {s: "pending" for s in STEPS}, "tools": {}, "workers": {}, "baseline": {},
                 "sections": {"correctness": [], "quality": []}}
-    save(run_dir, manifest)
+    _write_manifest(run_dir, manifest)  # a new run: nothing to lock against yet
     return run_dir
 
 
@@ -294,9 +327,13 @@ def _shape_problems(manifest: dict) -> List[str]:
     return problems
 
 
+def _write_manifest(run: Path, manifest: dict) -> None:
+    atomic_write(Path(run) / "manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+
+
 def save(run: Path, manifest: dict) -> None:
     with run_lock(run):
-        atomic_write(Path(run) / "manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+        _write_manifest(run, manifest)
 
 
 @contextlib.contextmanager
