@@ -140,6 +140,11 @@ def _configure_finding(s: argparse.ArgumentParser) -> None:
 
 
 def _detect(args: argparse.Namespace) -> int:
+    with runmod.run_lock(Path(args.run)):  # detect rewrites plans, modules and workers in one save
+        return _detect_locked(args)
+
+
+def _detect_locked(args: argparse.Namespace) -> int:
     run_dir = Path(args.run)
     manifest = runmod.load(run_dir)
     names: List[str] = list(detectmod.SCANNERS)

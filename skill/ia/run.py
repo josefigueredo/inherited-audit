@@ -259,10 +259,19 @@ def load(run: Path) -> dict:
 
 
 def save(run: Path, manifest: dict) -> None:
-    run = Path(run)
-    tmp = run / "manifest.json.tmp"
-    tmp.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    os.replace(tmp, run / "manifest.json")
+    with run_lock(run):
+        atomic_write(Path(run) / "manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+
+
+@contextlib.contextmanager
+def transaction(run: Path) -> Iterator[dict]:
+    """load -> change -> save under the run lock, so a parallel ia call cannot overwrite the change.
+
+    Nothing is saved when the block raises."""
+    with run_lock(run):
+        manifest = load(run)
+        yield manifest
+        save(run, manifest)
 
 
 def set_step(run: Path, step: str, state: str, force_open: Optional[str] = None) -> None:
@@ -272,12 +281,11 @@ def set_step(run: Path, step: str, state: str, force_open: Optional[str] = None)
         raise UsageError(f"unknown state {state!r}; expected one of {', '.join(STATES)}")
     if force_open is not None and not force_open.strip():
         raise UsageError("--force-open needs a reason")
-    manifest = load(run)
-    if state == "done":
-        from . import coverage  # local: coverage imports this module
-        coverage.guard_step(manifest, step, force_open.strip() if force_open is not None else None)
-    manifest["steps"][step] = state
-    save(run, manifest)
+    with transaction(run) as manifest:
+        if state == "done":
+            from . import coverage  # local: coverage imports this module
+            coverage.guard_step(manifest, step, force_open.strip() if force_open is not None else None)
+        manifest["steps"][step] = state
 
 
 def next_step(manifest: dict) -> Optional[str]:
@@ -455,7 +463,11 @@ def parse_set_pairs(manifest: dict, pairs: List[str]) -> List[Tuple[str, object]
 
 def set_keys(run: Path, pairs: List[str]) -> List[str]:
     """Sets manifest-level keys in one atomic save; returns the keys set."""
-    manifest = load(run)
+    with transaction(run) as manifest:
+        return _set_keys(manifest, pairs)
+
+
+def _set_keys(manifest: dict, pairs: List[str]) -> List[str]:
     parsed = parse_set_pairs(manifest, pairs)
     for key, value in parsed:
         m = _TESTS_BRANCH.match(key)
@@ -480,5 +492,4 @@ def set_keys(run: Path, pairs: List[str]) -> List[str]:
             manifest[key] = value
     if any(_RESULT_KEY.match(k) for k, _ in parsed) and baselines_closed(manifest):
         manifest["steps"]["baseline"] = "done"
-    save(run, manifest)
     return [k for k, _ in parsed]

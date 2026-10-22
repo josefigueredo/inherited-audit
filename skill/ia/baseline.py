@@ -141,9 +141,8 @@ def _link_deps(source_root: Path, target_root: Path, dirs: List[str], chunks: _C
 
 
 def _save_result(run: Path, alias: str, result: dict) -> None:
-    manifest = runmod.load(run)
-    manifest["baseline"].setdefault(alias, {})["result"] = result
-    runmod.save(run, manifest)
+    with runmod.transaction(run) as manifest:
+        manifest["baseline"].setdefault(alias, {})["result"] = result
 
 
 def _repo_and_plan(manifest: dict, alias: str) -> Tuple[dict, dict]:
@@ -310,10 +309,9 @@ def parse_pairs(alias_and_pairs: List[str]) -> Tuple[str, Dict[str, object]]:
 
 
 def set_plan(run: Path, alias: str, values: Dict[str, object]) -> dict:
-    manifest = runmod.load(Path(run))
-    _, plan = _repo_and_plan(manifest, alias)
-    plan.update(values)
-    edited = [k for k in plan.get("edited") or [] if isinstance(k, str)]
-    plan["edited"] = edited + [k for k in values if k not in edited]
-    runmod.save(Path(run), manifest)
+    with runmod.transaction(Path(run)) as manifest:
+        _, plan = _repo_and_plan(manifest, alias)
+        plan.update(values)
+        edited = [k for k in plan.get("edited") or [] if isinstance(k, str)]
+        plan["edited"] = edited + [k for k in values if k not in edited]
     return plan

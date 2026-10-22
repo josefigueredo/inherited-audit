@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from .run import RunError, UsageError, load, save
+from .run import RunError, UsageError, load, transaction
 
 # The races-distributed pass numbers its topics 1..RACES_TOPICS (references/passes/races-distributed.md, "Scope").
 RACES_TOPICS = 10
@@ -61,22 +61,21 @@ def add_cells(run: Path, pass_name: str, modules: List[str], result: str, topics
         raise UsageError(f"unknown pass {pass_name!r}; expected one of {', '.join(PASSES)}")
     if result not in RESULTS:
         raise UsageError(f"--result must be one of {', '.join(RESULTS)}, got {result!r}")
-    manifest = load(run)
-    known = modules_of(manifest)
-    if not known:
-        raise UsageError("the run has no modules; run `ia.py detect` first")
-    unknown = [m for m in modules if m not in known]
-    if unknown:
-        raise UsageError(f"unknown module {', '.join(unknown)}; known modules: {', '.join(known)}")
-    cells = manifest.setdefault("coverage", {}).setdefault(pass_name, {})
-    for module in modules:
-        cell: dict = {"result": result}
-        if topics:
-            cell["topics"] = topics
-        if note:
-            cell["note"] = note
-        cells[module] = cell
-    save(run, manifest)
+    with transaction(run) as manifest:
+        known = modules_of(manifest)
+        if not known:
+            raise UsageError("the run has no modules; run `ia.py detect` first")
+        unknown = [m for m in modules if m not in known]
+        if unknown:
+            raise UsageError(f"unknown module {', '.join(unknown)}; known modules: {', '.join(known)}")
+        cells = manifest.setdefault("coverage", {}).setdefault(pass_name, {})
+        for module in modules:
+            cell: dict = {"result": result}
+            if topics:
+                cell["topics"] = topics
+            if note:
+                cell["note"] = note
+            cells[module] = cell
 
 
 def cell_gap(manifest: dict, pass_name: str, module: str) -> Optional[str]:

@@ -77,5 +77,31 @@ class ParallelFindingAddTest(unittest.TestCase):
             self.assertEqual(node[key.split(".")[-1]], value, key)
 
 
+class ParallelManifestTest(unittest.TestCase):
+    def test_parallel_coverage_adds_keep_every_cell(self):
+        run = make_run(modules=PARALLEL)
+        results = parallel([["coverage", "add", "--run", str(run), "--pass", "security", "--module",
+                             f"BACK/src/m{i}", "--result", "nothing"] for i in range(PARALLEL)])
+        for r in results:
+            self.assertEqual(r.returncode, 0, r.stderr)
+        cells = runmod.load(run)["coverage"]["security"]
+        self.assertEqual(sorted(cells), sorted(f"BACK/src/m{i}" for i in range(PARALLEL)))
+        self.assertEqual([p.name for p in run.iterdir() if p.name.endswith(".tmp")], [])
+
+    def test_parallel_set_step_and_coverage_keep_every_write(self):
+        run = make_run(modules=4)
+        cmds = [["coverage", "add", "--run", str(run), "--pass", "quality-lenses", "--module", f"BACK/src/m{i}",
+                 "--result", "found"] for i in range(4)]
+        cmds += [["set", "--run", str(run), "author_model=m"], ["set", "--run", str(run), "lang=en"],
+                 ["set", "--run", str(run), 'strengths=["s"]'], ["step", "--run", str(run), "proof", "in_progress"],
+                 ["step", "--run", str(run), "tests", "skipped"], ["set", "--run", str(run), "host=cursor"]]
+        for r in parallel(cmds):
+            self.assertEqual(r.returncode, 0, r.stderr)
+        m = runmod.load(run)
+        self.assertEqual(len(m["coverage"]["quality-lenses"]), 4)
+        self.assertEqual((m["author_model"], m["lang"], m["strengths"], m["host"]), ("m", "en", ["s"], "cursor"))
+        self.assertEqual((m["steps"]["proof"], m["steps"]["tests"]), ("in_progress", "skipped"))
+
+
 if __name__ == "__main__":
     unittest.main()

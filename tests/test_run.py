@@ -281,7 +281,7 @@ class ManifestTest(unittest.TestCase):
         run_dir = self.make_run()
         run.set_step(run_dir, "baseline", "in_progress")
         self.assertEqual(run.load(run_dir)["steps"]["baseline"], "in_progress")
-        self.assertEqual(sorted(p.name for p in run_dir.iterdir()), ["findings", "manifest.json", "outputs"])
+        self.assertEqual(sorted(p.name for p in run_dir.iterdir() if p.name != run.LOCK_NAME), ["findings", "manifest.json", "outputs"])
 
     def test_set_step_rejects_unknown_step_or_state(self):
         run_dir = self.make_run()
@@ -364,7 +364,7 @@ class SetKeysTest(unittest.TestCase):
         self.assertEqual(m["strengths"], ["Clear module boundaries BACK/src/app.py:1"])
         self.assertEqual(m["baseline"]["BACK"]["tests_branch"], "tests/back-coverage")
         self.assertFalse(m["options"]["fix"])
-        self.assertEqual(sorted(p.name for p in self.run_dir.iterdir()), ["findings", "manifest.json", "outputs"])
+        self.assertEqual(sorted(p.name for p in self.run_dir.iterdir() if p.name != run.LOCK_NAME), ["findings", "manifest.json", "outputs"])
 
     def test_author_model_is_a_settable_string(self):
         r = self.cli("author_model=claude-opus-4")
