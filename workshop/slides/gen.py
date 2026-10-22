@@ -9,6 +9,7 @@ colours: blue is ia.py (never calls a model), violet is a model, grey the person
 from __future__ import annotations
 
 import html
+import json
 from pathlib import Path
 
 OUT = Path(__file__).resolve().parent.parent / "episodes" / "pages"
@@ -360,7 +361,95 @@ def s_protects():
     return ("Qué te protege y qué no", "", body, "`docs/showcase.md` («Qué te protege y qué no»)")
 
 
-SLIDES = [s_problem, s_delivers, s_steps, s_split, s_seq_run, s_seq_proof, s_seq_contrast, s_protects]
+# ---- what a pass costs (measured, tokens.json) ----
+
+SWEET = (1300, 6300)  # lines: tokens per line already flat and every run read the whole module
+
+
+def xy_panel(runs, x0, w, h, title, yof, ymax, yticks, yfmt):
+    """One log-x panel: a dot per run, a line through the mean per size, the sweet-spot band."""
+    import math
+    lo, hi = math.log10(150), math.log10(20000)
+    px = lambda v: x0 + 64 + (math.log10(v) - lo) / (hi - lo) * (w - 84)
+    py = lambda v: 40 + (1 - v / ymax) * (h - 90)
+    o = ['<text x="%.1f" y="22" font-size="17" font-weight="600" fill="#1d1d1f">%s</text>' % (x0 + 64, esc(title))]
+    o.append('<rect x="%.1f" y="40" width="%.1f" height="%d" fill="#2a8a76" opacity=".10"/>'
+             % (px(SWEET[0]), px(SWEET[1]) - px(SWEET[0]), h - 90))
+    o.append('<text x="%.1f" y="56" text-anchor="middle" font-size="13" font-weight="600" fill="#145246">'
+             'sweet spot</text>' % ((px(SWEET[0]) + px(SWEET[1])) / 2))
+    for t in yticks:
+        o.append('<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="#ececec"/>' % (x0 + 64, py(t), x0 + w - 20, py(t)))
+        o.append('<text x="%.1f" y="%.1f" text-anchor="end" font-size="12.5" fill="#7a7a7a">%s</text>'
+                 % (x0 + 56, py(t) + 4, yfmt(t)))
+    for t in (200, 500, 1000, 2000, 5000, 10000):
+        o.append('<text x="%.1f" y="%d" text-anchor="middle" font-size="12.5" fill="#7a7a7a">%s</text>'
+                 % (px(t), h - 30, "{:,}".format(t).replace(",", ".")))
+    o.append('<text x="%.1f" y="%d" text-anchor="middle" font-size="13" fill="#3a3a3c">líneas del módulo '
+             '(escala logarítmica)</text>' % (x0 + 64 + (w - 84) / 2, h - 8))
+    sizes = sorted({r["lines"] for r in runs})
+    means = [(L, sum(yof(r) for r in runs if r["lines"] == L) / len([r for r in runs if r["lines"] == L]))
+             for L in sizes]
+    o.append('<polyline fill="none" stroke="#7a4fe0" stroke-width="2.5" points="%s"/>'
+             % " ".join("%.1f,%.1f" % (px(L), py(m)) for L, m in means))
+    for r in runs:
+        full = r["module_files_read"] >= r["files"]
+        o.append('<circle cx="%.1f" cy="%.1f" r="6" fill="%s" stroke="#7a4fe0" stroke-width="2"/>'
+                 % (px(r["lines"]), py(yof(r)), "#7a4fe0" if full else "#fff"))
+    return "".join(o), px, py
+
+
+def s_tokens():
+    data = json.loads((Path(__file__).resolve().parent / "tokens.json").read_text(encoding="utf-8"))
+    runs = data["runs"]
+    w, h = 660, 400
+    a, pxa, pya = xy_panel(runs, 0, w, h, "Tokens por pasada (miles)", lambda r: r["tokens"] / 1000, 1000,
+                           (0, 250, 500, 750, 1000), lambda t: "%dk" % t)
+    b, pxb, pyb = xy_panel(runs, w + 40, w, h, "Tokens por línea del módulo", lambda r: r["tokens"] / r["lines"], 750,
+                           (0, 250, 500, 750), lambda t: "%d" % t)
+    partial = [r for r in runs if r["module_files_read"] < r["files"]]
+    note = ""
+    if partial:
+        r = partial[0]
+        note = ('<text x="%.1f" y="%.1f" text-anchor="end" font-size="13" %s>leyó %d de %d archivos</text>'
+                % (pxa(r["lines"]) - 10, pya(r["tokens"] / 1000) + 4, HALO, r["module_files_read"], r["files"]))
+    svg = ('<svg viewBox="0 0 %d %d" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,'
+           'BlinkMacSystemFont,Helvetica,Arial,sans-serif">%s%s%s</svg>' % (2 * w + 40, h, a, b, note))
+    lo = [r["tokens"] for r in runs if r["lines"] < 1000]
+    per_call = fit([r["tool_calls"] for r in runs], [r["tokens"] for r in runs])
+    sweet = [r["tokens"] / r["lines"] for r in runs if SWEET[0] <= r["lines"] <= SWEET[1]]
+    k = lambda v: "{:,}".format(int(round(v, -3)) // 1000).replace(",", ".") + "k"
+    cards = (
+        '<div class="grid" style="grid-template-columns:repeat(3,1fr);gap:14px;margin-top:10px">'
+        '<div class="card"><h3>Hay un piso</h3><p>Con menos de 1.000 líneas, igual cuesta %s a %s: la skill se lee '
+        'siempre y cada vuelta reenvía el contexto.</p></div>'
+        '<div class="card"><h3>Pesan las vueltas</h3><p>Cada llamada a una herramienta suma ~%s tokens '
+        '(R² %s). Muchos archivos chicos cuestan más que pocos grandes.</p></div>'
+        '<div class="card" style="background:#e6f4f1;border-color:#bfe3da"><h3 style="color:#145246">'
+        '1.300 a 6.200 líneas por subagente</h3><p>%d a %d tokens por línea y el módulo leído entero. Con 12.357, '
+        'una de dos corridas dejó archivos sin leer.</p></div></div>'
+        % (k(min(lo)), k(max(lo)), "{:,}".format(int(round(per_call[1], -2))).replace(",", "."), ("%.2f" % per_call[2]).replace(".", ","),
+           min(sweet), max(sweet)))
+    body = ('<div style="flex:1;min-height:0">%s</div>%s' % (svg, cards))
+    source = ("medido el %s con `%s` en `cursor-agent`, pasada `%s` en solo lectura, 2 corridas por tamaño "
+              "(`workshop/slides/tokens.json`)" % (data["measured"], data["model"], data["pass"]))
+    share = [r["cache_read"] / r["tokens"] for r in runs]
+    return ("Cuántos tokens procesa una pasada, según el tamaño del módulo",
+            "Entrada más salida de una pasada de correctitud. Entre el %d %% y el %d %% es lectura de caché, que se "
+            "cobra más barata. El círculo vacío es una corrida que no leyó todo el módulo."
+            % (round(100 * min(share)), round(100 * max(share))), body, source)
+
+
+def fit(xs, ys):
+    """Least squares y = a + b*x: (a, b, r2)."""
+    n = len(xs)
+    mx, my = sum(xs) / n, sum(ys) / n
+    b = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sum((x - mx) ** 2 for x in xs)
+    a = my - b * mx
+    ss = sum((y - a - b * x) ** 2 for x, y in zip(xs, ys))
+    return a, b, 1 - ss / sum((y - my) ** 2 for y in ys)
+
+
+SLIDES = [s_problem, s_delivers, s_steps, s_split, s_seq_run, s_seq_proof, s_seq_contrast, s_tokens, s_protects]
 
 
 def main() -> None:
