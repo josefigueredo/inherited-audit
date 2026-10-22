@@ -196,6 +196,28 @@ class RunBaselineTest(unittest.TestCase):
         self.assertTrue(result["timed_out"])
         self.assertEqual(len(git(repo, "worktree", "list").splitlines()), 1)
 
+    def _hook(self, hooks_dir: Path) -> Path:
+        marker = make_dir() / "hook-ran"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        hook = hooks_dir / "post-checkout"
+        hook.write_text(f"#!/bin/sh\necho ran > '{marker}'\n", encoding="utf-8")
+        hook.chmod(0o755)
+        return marker
+
+    def test_repo_hooks_never_run(self):
+        run, repo, _ = make_run()
+        marker = self._hook(repo / ".git" / "hooks")
+        result = bl.run_baseline(run, "BACK", 60)
+        self.assertEqual(result["passed"], 1)
+        self.assertFalse(marker.exists(), "the audited repo's post-checkout hook ran")
+
+    def test_hooks_path_of_the_repo_never_runs(self):
+        run, repo, _ = make_run()
+        marker = self._hook(repo / ".husky")
+        git(repo, "config", "core.hooksPath", ".husky")
+        bl.run_baseline(run, "BACK", 60)
+        self.assertFalse(marker.exists(), "the core.hooksPath hook ran")
+
     def test_missing_command_recorded_not_raised(self):
         run, _, _ = make_run(test_cmd=["definitely-not-a-binary-xyz"])
         result = bl.run_baseline(run, "BACK", 60)

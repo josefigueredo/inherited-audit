@@ -91,9 +91,15 @@ def atomic_write(path: Path, text: str) -> None:
         raise
 
 
+# The audited repo is untrusted: `worktree add` would run its post-checkout hook (.git/hooks, husky's core.hooksPath)
+# outside every timeout. ia never needs a hook, and never reads stdin.
+NO_HOOKS = ("-c", "core.hooksPath=/dev/null")
+
+
 def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
     try:
-        result = subprocess.run(["git", *args], cwd=str(repo), capture_output=True, text=True)
+        result = subprocess.run(["git", *NO_HOOKS, *args], cwd=str(repo), capture_output=True, text=True,
+                                stdin=subprocess.DEVNULL)
     except (OSError, ValueError) as exc:
         raise ToolError(f"git is not available: {exc}")
     if check and result.returncode != 0:

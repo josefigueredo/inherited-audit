@@ -41,7 +41,7 @@ def _repo_path(repo: dict, path: str) -> str:
 
 def _git(repo: dict, *args: str) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(["git", "-C", repo["path"], *args], capture_output=True)
+        return subprocess.run(["git", "-C", repo["path"], *args], capture_output=True, stdin=subprocess.DEVNULL)
     except (OSError, ValueError) as exc:
         raise ToolError(f"git is not available: {exc}")
 

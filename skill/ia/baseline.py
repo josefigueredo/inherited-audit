@@ -256,8 +256,9 @@ def run_baseline(run: Path, alias: str, timeout: int) -> dict:
     finally:
         if added:
             subprocess.run(["git", "worktree", "remove", "--force", str(wt)], cwd=str(repo_path),
-                           capture_output=True)
-        subprocess.run(["git", "worktree", "prune"], cwd=str(repo_path), capture_output=True)
+                           capture_output=True, stdin=subprocess.DEVNULL)
+        subprocess.run(["git", "worktree", "prune"], cwd=str(repo_path), capture_output=True,
+                       stdin=subprocess.DEVNULL)
         shutil.rmtree(tmp, ignore_errors=True)
     text = chunks.text()
     out_rel = f"outputs/baseline-{alias}.txt"
