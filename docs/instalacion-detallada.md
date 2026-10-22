@@ -59,12 +59,12 @@ Las capturas de esta guía y del showcase salen de `tienda`, un repo de juguete 
 | Comando | Qué hace |
 |---|---|
 | `init --system <nombre> --repo ALIAS=RUTA[:SUBCARPETA] --host <host>` | Crea la corrida (por defecto `<carpeta que contiene la raíz git del primer repo>/<sistema>-inherited-audit/<fecha>/`) y fija el `HEAD` de cada repo. El nombre del sistema va en nombres de archivo: letras, números, `.`, `_` y `-`, empezando por letra o número. `--repo` se repite; el alias es con lo que empieza cada cita. Opcionales: `--publish`, `--lang`, `--out` |
-| `detect --run <corrida>` | Stack, comando de tests y dependencias de cada repo, y los obreros que faltan en este host con su comando de instalación. Propone `deps: none` salvo que la carpeta de dependencias ya exista y coincida con el lockfile; la instalación queda como sugerencia y se pregunta. Lo que se baja con `npx` va aparte: siempre se pregunta |
+| `detect --run <corrida>` | Stack (TypeScript/JavaScript, Python, Java/Kotlin con Maven o Gradle, Go), comando de tests y dependencias de cada repo, y los obreros que faltan en este host con su comando de instalación. Propone `deps: none` salvo que la carpeta de dependencias ya exista y coincida con el lockfile; la instalación queda como sugerencia y se pregunta. Lo que se baja con `npx` va aparte: siempre se pregunta |
 | `baseline --run <corrida>` | Corre cada suite en el commit fijado, en un worktree descartable, y guarda la salida cruda en `outputs/`. Los números salen del comando de tests; la cobertura, de un paso aparte que si falla no los pierde |
 | `finding add --run <corrida> <archivo.json>` | Valida un hallazgo contra el esquema y le asigna id (`C-NN` correctitud, `Q-NN` calidad) |
 | `status --run <corrida>` | Cada paso con su estado y cuál sigue: así se retoma |
 | `baseline --run <corrida> --set ALIAS CLAVE=VALOR…` | Corrige el plan de un repo sin correr nada (por ejemplo `test_cmd`, `env`, `deps=install` cuando aceptaste instalar). Un `detect` posterior respeta lo que cambiaste |
-| `set --run <corrida> CLAVE=VALOR…` | Cambia claves del manifest sin editarlo a mano: `host`, `lang`, `options.publish`, `sections.correctness`, `sections.quality`, `strengths`, `baseline.<ALIAS>.tests_branch` y el resultado de la línea base a mano (`baseline.<ALIAS>.result.passed`, `failed`, `total`, `coverage`, `runner`, `measured`). Valida todo antes de guardar |
+| `set --run <corrida> CLAVE=VALOR…` | Cambia claves del manifest sin editarlo a mano: `host`, `lang`, `options.publish`, `sections.correctness`, `sections.quality`, `strengths`, `baseline.<ALIAS>.tests_branch`, los módulos de un repo cuando `detect` los cortó mal (`modules.<ALIAS>=["internal/orders",…]`, cada uno una carpeta en el commit fijado; un `detect` posterior los respeta) y el resultado de la línea base a mano (`baseline.<ALIAS>.result.passed`, `failed`, `total`, `coverage`, `runner`, `measured`). Valida todo antes de guardar |
 
 Lo que `detect` lista como faltante depende de la máquina donde corre: la captura muestra la de quien la armó.
 
@@ -92,7 +92,9 @@ Lo que `detect` lista como faltante depende de la máquina donde corre: la captu
 | 0 | Salió bien |
 | 1 | El comando encontró problemas: repo con cambios, salida commiteable, corrida existente, cita rota, ramas que no combinan, higiene sucia, hallazgo inválido |
 | 2 | Uso: un paso, un estado o un argumento que no existe |
-| 3 | Una herramienta externa falló o no está (por ejemplo `git`) |
+| 3 | Una herramienta externa falló o no está (por ejemplo `git`), o un comando de la suite no arrancó |
+| 4 | Falló `ia.py` mismo (un error que no esperaba): una línea; con `IA_DEBUG=1`, el traceback |
+| 128+N | Una señal N lo detuvo después de limpiar la suite y el worktree (143 SIGTERM, 129 SIGHUP, 130 Ctrl-C) |
 
 ## De dónde sale cada captura
 

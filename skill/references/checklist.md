@@ -24,9 +24,24 @@ The step names in backticks are the keys of `manifest.json` `steps`, in order.
 ## Step 0 details (`baseline`)
 
 - `ia.py init` refuses a dirty repo and a run dir that git could commit; fix the cause, never work around it.
-- `ia.py detect` writes a plan per repo. Stacks other than TypeScript/JavaScript and Python come back `unknown`: work
-  out the suite command yourself, set it with `ia.py baseline --run DIR --set ALIAS test_cmd=[...]`, and say in the report that
-  the stack was "not measured with tools" (`measured=false`).
+- `ia.py detect` writes a plan per repo for TypeScript/JavaScript, Python, Java/Kotlin (Maven or Gradle; `framework:
+  spring-boot` when the build uses it) and Go. JVM and Go suites run offline, so a missing dependency cache fails the
+  suite instead of downloading: offer `deps=install` (it runs the plan's `install_cmd` first) and ask. Other stacks
+  come back `unknown`: work out the suite command yourself, set it with
+  `ia.py baseline --run DIR --set ALIAS test_cmd=[...]` (and `junit=[...]` when it writes JUnit XML reports), set
+  its modules with `ia.py set --run DIR 'modules.ALIAS=[...]'`, and say in the report that the stack was "not measured
+  with tools" (`measured=false`).
+- Modules `detect` records, by stack:
+  - TypeScript/JavaScript and Python: the folders under `src/modules`, `src/features`, `src/app`, `app`,
+    `src/components`, and every other folder of `src/` (of the root without `src/`), plus `src/.` (or `.`) for the
+    files sitting directly there.
+  - Java/Kotlin: per project (the root and every Maven module or Gradle subproject), the children of the base package
+    under `src/main/java|kotlin` (Spring's feature or layer packages), `<base package>/.` for its own files (the
+    `@SpringBootApplication` class), and `src/main/resources` (`application.yml` and its profiles). Counts come from
+    the JUnit XML reports (`junit` in the plan).
+  - Go: `cmd/*`, `internal/*`, `pkg/*`, the other top-level packages, `<container>/.` and `.` for loose Go files;
+    never `vendor/` or `testdata/`. Counts come from `go test -json`.
+  - When the cut is wrong, replace it: `ia.py set --run DIR 'modules.ALIAS=[...]'`.
 - Choose the audit's categories from the system's domains (not a fixed list) and record their order with
   `ia.py set --run DIR 'sections.correctness=[...]' 'sections.quality=[...]'` (see `references/schema.md`).
 - A failing baseline is a fact, not a blocker: record it. Later suites are compared against it.
