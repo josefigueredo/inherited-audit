@@ -44,6 +44,7 @@ recorrido entero está en el [showcase](docs/showcase.md#4-los-dos-reportes).
 | **Instalarla y probarla, conversando con tu agente** | [Instalación y primer uso](docs/instalacion.md) | Todo con prompts, en Claude Code y en Cursor: instalar, auditar, retomar |
 | **Instalarla comando por comando** | [Instalación detallada](docs/instalacion-detallada.md) | Requisitos, `./install.sh`, cada comando de `ia.py` y sus códigos de salida, con capturas |
 | **Ver todo lo que hace** | [Showcase](docs/showcase.md) | Cada caso: qué le decís al agente, qué corre, qué ves y qué pasa si algo falla |
+| **Verla en el taller de skills** | [Episodio del taller](https://urban-dollop-zq7o98l.pages.github.io/) | El episodio que se dio en el taller de team, publicado en GitHub Pages (sitio privado: entrás con tu cuenta de la organización). El guion vive en [`workshop/`](workshop/) |
 | **Consultar el checklist y los formatos** | [Referencia](docs/referencia.md) | Los once pasos, los obreros por host, las opciones, la carpeta de una corrida, los campos de un hallazgo y los códigos de salida |
 
 ## En tres comandos
