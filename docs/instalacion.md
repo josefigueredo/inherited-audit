@@ -25,7 +25,7 @@ Si una sesión que ya estaba abierta no encuentra la skill, cerrala y abrila de 
 
 El agente detecta que corre en Claude Code, crea la corrida al lado del primer repo
 (`~/w/tienda-inherited-audit/<fecha>/`), fija el commit de cada repo y mide la suite. Antes de seguir te muestra los
-obreros que faltan (por ejemplo semgrep o un plugin de revisión) con su comando de instalación, y te pregunta **una sola
+workers que faltan (por ejemplo semgrep o un plugin de revisión) con su comando de instalación, y te pregunta **una sola
 vez** cuáles querés. Lo que no instales lo cubre una pasada propia de la skill durante toda la corrida.
 
 Si un repo tiene cambios sin commitear, la corrida no arranca: el agente te pregunta si los commitea o los guarda
@@ -39,7 +39,7 @@ En el chat del agente de Cursor, el mismo pedido:
 
 > *«Auditá el sistema tienda antes de que empecemos: el back está en ~/w/tienda-api y el front en ~/w/tienda-web»*
 
-El agente detecta que corre en Cursor y usa los obreros de Cursor en cada paso (por ejemplo `/review-bugbot` para los
+El agente detecta que corre en Cursor y usa los workers de Cursor en cada paso (por ejemplo `/review-bugbot` para los
 bugs generales y otro modelo con `agent` para el contraste). El checklist, los hallazgos y los reportes son los mismos.
 
 ## 4. Retomar una corrida
@@ -49,7 +49,7 @@ Una auditoría real lleva horas y no entra en una sesión. Para seguir, en cualq
 > *«Retomá la auditoría de tienda»*
 
 El agente corre `ia.py status`, lee qué pasos están hechos y sigue en el primero pendiente. Si empezaste en Claude Code
-y seguís en Cursor, desde ahí usa los obreros de Cursor; las opciones que elegiste al principio no se vuelven a
+y seguís en Cursor, desde ahí usa los workers de Cursor; las opciones que elegiste al principio no se vuelven a
 preguntar.
 
 ## 5. Sumar los subagentes opcionales

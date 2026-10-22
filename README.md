@@ -10,7 +10,7 @@ rama aparte.
 
 | Le decís al agente… | Y la skill… |
 |---|---|
-| *«Auditá este sistema antes de que empecemos: el back está en ~/w/api y el front en ~/w/web»* | fija el commit de cada repo, mide la suite, pregunta una sola vez qué obreros faltan instalar y recorre el checklist hasta los dos reportes |
+| *«Auditá este sistema antes de que empecemos: el back está en ~/w/api y el front en ~/w/web»* | fija el commit de cada repo, mide la suite, pregunta una sola vez qué workers faltan instalar y recorre el checklist hasta los dos reportes |
 | *«Auditá este servicio de Spring Boot que heredamos: ~/w/pagos»* | detecta Maven o Gradle, corre la suite sin bajar dependencias (si falta la caché, pregunta antes de instalar), cuenta los tests desde los reportes JUnit y arma los módulos por paquete |
 | *«Retomá la auditoría de tienda»* | lee `manifest.json` de la corrida y sigue en el primer paso que no está hecho, en Claude Code o en Cursor |
 | *«¿Qué quedó afuera del reporte y por qué?»* | corre el filtro y te dice cuántos hallazgos se muestran de cuántos, y qué regla dejó afuera al resto |
@@ -45,7 +45,7 @@ recorrido entero está en el [showcase](docs/showcase.md#4-los-dos-reportes).
 | **Instalarla comando por comando** | [Instalación detallada](docs/instalacion-detallada.md) | Requisitos, `./install.sh`, cada comando de `ia.py` y sus códigos de salida, con capturas |
 | **Ver todo lo que hace** | [Showcase](docs/showcase.md) | Cada caso: qué le decís al agente, qué corre, qué ves y qué pasa si algo falla |
 | **Verla en el taller de skills** | [Episodio del taller](https://urban-dollop-zq7o98l.pages.github.io/) | El episodio que se dio en el taller de team, publicado en GitHub Pages (sitio privado: entrás con tu cuenta de la organización). El guion vive en [`workshop/`](workshop/) |
-| **Consultar el checklist y los formatos** | [Referencia](docs/referencia.md) | Los once pasos, los obreros por host, las opciones, la carpeta de una corrida, los campos de un hallazgo y los códigos de salida |
+| **Consultar el checklist y los formatos** | [Referencia](docs/referencia.md) | Los once pasos, los workers por host, las opciones, la carpeta de una corrida, los campos de un hallazgo y los códigos de salida |
 
 ## En tres comandos
 
@@ -58,7 +58,7 @@ python3 ~/.claude/skills/inherited-audit/ia.py status --run <carpeta-de-la-corri
 El estado de la corrida no se edita a mano: el plan de cada repo cambia con `ia.py baseline --set` y el resto del
 manifest (`host`, `sections`, `strengths`, la rama de tests) con `ia.py set --run <carpeta-de-la-corrida> CLAVE=VALOR`.
 
-Requisitos: `python3` 3.9 o más (solo biblioteca estándar) y `git` 2.38 o más. Los obreros externos (semgrep,
+Requisitos: `python3` 3.9 o más (solo biblioteca estándar) y `git` 2.38 o más. Los workers externos (semgrep,
 osv-scanner, los plugins de cada host) son opcionales: la skill pregunta por ellos una vez.
 
 ## Desarrollo
