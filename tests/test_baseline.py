@@ -238,6 +238,64 @@ class GoBaselineTest(unittest.TestCase):
         self.assertEqual(result["coverage"], 50.0, result.get("coverage_error"))
 
 
+# Real outputs captured on 2026-10-22 (Maven 3.9 and Gradle 8.10 in Docker, go 1.27.1) with an empty dependency cache.
+MAVEN_OFFLINE = ("[ERROR] Non-resolvable parent POM for com.acme:pagos:0.1.0: The following artifacts could not be "
+                 "resolved: org.springframework.boot:spring-boot-starter-parent:pom:3.3.4 (absent): Cannot access "
+                 "central (https://repo.maven.apache.org/maven2) in offline mode and the artifact "
+                 "org.springframework.boot:spring-boot-starter-parent:pom:3.3.4 has not been downloaded from it before.")
+GRADLE_OFFLINE = ("   > Could not download spring-boot-3.3.4.jar (org.springframework.boot:spring-boot:3.3.4): "
+                  "No cached version available for offline mode")
+GRADLE_PLUGIN_OFFLINE = ("- Plugin Repositories (could not resolve plugin artifact "
+                         "'org.springframework.boot:org.springframework.boot.gradle.plugin:3.3.4')")
+GO_OFFLINE = "\n".join([
+    '{"ImportPath":"github.com/google/go-cmp/cmp","Action":"build-output","Output":"# example.com/godep\\n"}',
+    '{"ImportPath":"github.com/google/go-cmp/cmp","Action":"build-output","Output":"d.go:3:8: module lookup '
+    'disabled by GOPROXY=off\\n"}',
+    _go_event("start", "example.com/godep"), _go_event("fail", "example.com/godep")])
+GO_TOOLCHAIN = "go: go.mod requires go >= 1.99 (running go 1.27.1; GOTOOLCHAIN=local)"
+
+
+class MissingCacheTest(unittest.TestCase):
+    def suite(self, text: str, code: int = 1) -> list:
+        return [sys.executable, "-c", f"import sys\nprint({text!r})\nsys.exit({code})"]
+
+    def assert_not_measured(self, result: dict, *needles: str) -> None:
+        self.assertFalse(result["measured"], result)
+        self.assertIsNone(result["passed"])
+        for needle in needles:
+            self.assertIn(needle, result["error"])
+
+    def test_offline_cache_misses_are_reported_as_missing_dependencies(self):
+        for text in (MAVEN_OFFLINE, GRADLE_OFFLINE, GRADLE_PLUGIN_OFFLINE, GO_OFFLINE):
+            run, _, _ = make_run(test_cmd=self.suite(text), install_cmd=["mvn", "warm-up"])
+            result = bl.run_baseline(run, "BACK", 60)
+            self.assert_not_measured(result, "not in the local cache", "deps=install", "mvn warm-up")
+            self.assertNotEqual(runmod.load(run)["steps"]["baseline"], "done")
+
+    def test_a_go_toolchain_too_old_is_not_a_cache_problem(self):
+        run, _, _ = make_run(test_cmd=self.suite(GO_TOOLCHAIN))
+        result = bl.run_baseline(run, "BACK", 60)
+        self.assert_not_measured(result, "go >= 1.99", "GOTOOLCHAIN=local")
+        self.assertNotIn("deps=install", result["error"])
+
+    def test_cli_says_what_to_do_and_exits_1(self):
+        run, _, _ = make_run(test_cmd=self.suite(MAVEN_OFFLINE), install_cmd=["mvn", "warm-up"])
+        r = run_cli(["baseline", "--run", str(run)])
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("deps=install", r.stderr)
+        self.assertNotIn("could not parse", r.stderr)
+
+    def test_a_marker_next_to_passing_tests_keeps_the_counts_with_a_warning(self):
+        """Some tests ran (one module had its cache, another did not): the counts stay, flagged as maybe partial."""
+        text = "(module b) Cannot access central in offline mode\nRan 3 tests in 0.1s\n\nOK"
+        run, _, _ = make_run(test_cmd=self.suite(text, 0))
+        result = bl.run_baseline(run, "BACK", 60)
+        self.assertEqual((result["measured"], result["passed"]), (True, 3))
+        self.assertIn("may be partial", result["warning"])
+        r = run_cli(["baseline", "--run", str(run)])
+        self.assertIn("may be partial", r.stderr)
+
+
 class RunBaselineTest(unittest.TestCase):
     def test_junit_reports_written_by_the_suite_give_the_counts(self):
         write = ("import os\nos.makedirs('target/surefire-reports')\n"

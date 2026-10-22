@@ -32,6 +32,11 @@ _COUNT = re.compile(r"(\d+) ([A-Za-z]+)")
 _MAVEN = re.compile(r"^(?:\[(?:INFO|WARNING|ERROR)\]\s+)?Tests run: (\d+), Failures: (\d+), Errors: (\d+), "
                     r"Skipped: (\d+)\s*$")
 _GRADLE = re.compile(r"^(\d+) tests? completed(?:, (\d+) failed)?(?:, (\d+) skipped)?")
+# What an offline run prints when a dependency is missing from the local cache (measured on 2026-10-22 with Maven 3.9,
+# Gradle 8.10 and go 1.27.1). The suite never really ran: it is not a result, and the fix is deps=install.
+_CACHE_MISS = (re.compile(r"in offline mode"), re.compile(r"No cached version (?:of .+ )?available for offline mode"),
+               re.compile(r"could not resolve plugin artifact"), re.compile(r"module lookup disabled by GOPROXY=off"))
+_GO_TOOLCHAIN = re.compile(r"go\.mod requires go >= (\S+) \(running go (\S+); GOTOOLCHAIN=local\)")
 _GO_BUILD_FAILED = re.compile(r"^FAIL\s+(\S+)\s+\[(?:build|setup) failed\]")
 _COVER_GO = re.compile(r"^total:\s+\(statements\)\s+([\d.]+)%")
 _COVER_ALL = re.compile(r"^\s*All files\s*\|\s*([\d.]+)")
@@ -198,6 +203,24 @@ def parse_junit(cwd: Path, globs: List[str]) -> Optional[dict]:
             "files": read, "skipped_files": refused}
 
 
+def offline_problem(text: str, alias: str, install_cmd: Optional[List[str]]) -> Optional[str]:
+    """Why an offline suite could not really run (a dependency or toolchain missing locally), or None."""
+    from . import hygiene  # local: keep the import graph acyclic
+    m = _GO_TOOLCHAIN.search(text)
+    if m:
+        return (f"go.mod requires go >= {m.group(1)} but the local toolchain is go {m.group(2)}, and GOTOOLCHAIN=local "
+                f"forbids downloading one: ask the person to install Go {m.group(1)}, or to allow the download "
+                "(remove GOTOOLCHAIN=local from test_cmd with `baseline --set`)")
+    for line in _ANSI.sub("", text).splitlines():
+        if any(p.search(line) for p in _CACHE_MISS):
+            how = (f"runs `{' '.join(install_cmd)}` first" if install_cmd
+                   else "runs the install_cmd you set with `baseline --set` first")
+            return (f"the suite ran offline and its dependencies are not in the local cache "
+                    f"({hygiene.mask_line(line.strip())[:160]}): ask the person before downloading them; then "
+                    f"`ia.py baseline --set {alias} deps=install` {how}")
+    return None
+
+
 def _empty_result(**over) -> dict:
     result = {"passed": None, "failed": None, "total": None, "coverage": None, "runner": None, "exit_code": None,
               "output": None, "timed_out": False, "measured": False}
@@ -345,6 +368,7 @@ def run_baseline(run: Path, alias: str, timeout: int) -> dict:
     coverage: Optional[float] = None
     coverage_error = ""
     junit: Optional[dict] = None
+    warning = ""
     groups: List[int] = []
     try:
         runmod._git(repo_path, "worktree", "add", "--detach", str(wt), repo["sha"])
@@ -379,6 +403,11 @@ def run_baseline(run: Path, alias: str, timeout: int) -> dict:
                 break
         if ran_suite and plan.get("junit"):  # read before the worktree goes
             junit = parse_junit(cwd, list(plan["junit"]))
+        problem = offline_problem(suite_text, alias, plan.get("install_cmd")) if ran_suite else None
+        if problem and not (junit or parse_summary(suite_text))["passed"]:
+            error, ran_suite, junit = problem, False, None  # nothing ran: not a result, and no coverage either
+        elif problem:
+            warning = f"some dependencies were missing, so the counts may be partial; {problem}"
         cov_cmd = list(plan.get("coverage_cmd") or [])
         if ran_suite and cov_cmd:
             counts = junit or parse_summary(suite_text)
@@ -413,6 +442,8 @@ def run_baseline(run: Path, alias: str, timeout: int) -> dict:
             result["junit_skipped"] = junit["skipped_files"]
     if error:
         result["error"] = error
+    if warning:
+        result["warning"] = warning
     if coverage_error:
         result["coverage_error"] = coverage_error
     _save_result(run, alias, result)

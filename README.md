@@ -73,7 +73,10 @@ un sistema con hallazgos conocidos, contra la que `ia.py eval` mide cuántos red
 repo compartido, para que nadie vea las respuestas. Se usa con `ia.py eval --run <corrida> --reference
 <ruta>/<tabla-de-referencia>.json`, y el test que la lee corre con
 `IA_EVAL_REFERENCE=<ruta>/<tabla-de-referencia>.json python3 -m unittest discover -s tests` (sin la variable se
-omite). Lo mismo con los nombres del sistema auditado que nunca tienen que aparecer en `skill/` ni en `agents/`: viven
+omite). Los tests que corren Maven y Gradle de verdad, en Docker, contra un proyecto Spring Boot en Java y otro en
+Kotlin, corren con `IA_DOCKER_JVM=1 python3 -m unittest discover -s tests -p test_jvm_docker.py` (bajan las imágenes
+`maven` y `gradle` y las dependencias a volúmenes de Docker que borran al terminar; sin la variable se omiten). Lo
+mismo con los nombres del sistema auditado que nunca tienen que aparecer en `skill/` ni en `agents/`: viven
 en un archivo aparte, una expresión regular por línea, y el test los suma con `IA_LEAK_TERMS=<ruta>`. Las capturas se
 rehacen con `docs/img/src/demo/setup.sh` (arma un `HOME` de prueba con el repo `tienda`) y `hdoc term` / `hdoc
 render`.

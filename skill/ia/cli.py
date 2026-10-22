@@ -322,6 +322,8 @@ def _baseline(args: argparse.Namespace) -> int:
             print(f"{alias}: {result['runner'] or 'unknown runner'}  passed: {result['passed']}  "
                   f"failed: {result['failed']}  total: {result['total']}  exit: {result['exit_code']}{cov}  "
                   f"output: {result['output']}")
+            if result.get("warning"):
+                print(f"{alias}: warning: {result['warning']} (tell the person)", file=sys.stderr)
     manifest = runmod.load(run_dir)
 
     done = runmod.baselines_closed(manifest)

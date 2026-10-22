@@ -131,7 +131,10 @@ class JvmDetector:
     """Java and Kotlin with Maven or Gradle (Spring Boot or not).
 
     Dependencies live in ~/.m2 or ~/.gradle, not in the repo, so the suite runs offline (`-o`, `--offline`): fetching
-    them is installing, and only `deps=install` runs `install_cmd` first. The counts come from the JUnit XML reports
+    them is installing, and only `deps=install` runs `install_cmd` first. That warm-up is the suite itself, online:
+    `dependency:go-offline` and `gradle dependencies` leave jars and the Surefire provider out (measured with Maven
+    3.9 and Gradle 8.10 on 2026-10-22). Gradle's warm-up ignores its exit, because a failing test exits 1; the
+    offline run right after reports anything still missing. The counts come from the JUnit XML reports
     (`junit`), because Gradle prints no summary when every test passes and Maven prints one per module.
     """
     name = "jvm"
@@ -146,13 +149,13 @@ class JvmDetector:
         if (root / "pom.xml").is_file():
             mvn = "./mvnw" if (root / "mvnw").is_file() else "mvn"
             plan.update(test_cmd=[mvn, "-B", "-ntp", "-o", "-Dmaven.test.failure.ignore=true", "test"],
-                        install_cmd=[mvn, "-B", "-ntp", "dependency:go-offline"],
+                        install_cmd=[mvn, "-B", "-ntp", "-Dmaven.test.failure.ignore=true", "test"],
                         junit=["**/target/surefire-reports/TEST-*.xml"])
             build = _read(root / "pom.xml")
         else:
             gradle = "./gradlew" if (root / "gradlew").is_file() else "gradle"
             plan.update(test_cmd=[gradle, "test", "--offline", "--continue", "--console=plain"],
-                        install_cmd=[gradle, "dependencies", "--console=plain"],
+                        install_cmd=["sh", "-c", f"{gradle} test --continue --console=plain || true"],
                         junit=["**/build/test-results/**/TEST-*.xml"])
             build = "".join(_read(root / f) for f in self.GRADLE)
         if "org.springframework.boot" in build or "spring-boot" in build:
