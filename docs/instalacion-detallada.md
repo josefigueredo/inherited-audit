@@ -16,14 +16,16 @@ acá están para que veas qué hace cada uno.
 ```bash
 cd <ruta-a-tu-clon>/inherited-audit && ./install.sh
 ./install.sh --agents   # opcional: también los subagentes ia-auditor
+./install.sh --cursor   # en vez de lo anterior, si solo usás Cursor (suma --agents si los querés)
 ```
 
 ![Terminal: ./install.sh enlaza skill/ en ~/.claude/skills, --agents suma ia-auditor, eval/ no queda instalado](img/terminal-instalar.png)
 
 | Enlace | Apunta a | Cuándo |
 |---|---|---|
-| `~/.claude/skills/inherited-audit` | `skill/` del repo | Siempre |
-| `~/.claude/agents/ia-auditor.md` | `agents/claude/ia-auditor.md` | Con `--agents` |
+| `~/.claude/skills/inherited-audit` | `skill/` del repo | Sin `--cursor` |
+| `~/.cursor/skills/inherited-audit` | `skill/` del repo | Con `--cursor` |
+| `~/.claude/agents/ia-auditor.md` | `agents/claude/ia-auditor.md` | Con `--agents`, sin `--cursor` |
 | `~/.cursor/agents/ia-auditor.md` | `agents/cursor/ia-auditor.md` | Con `--agents` |
 
 Solo se enlaza `skill/`, así que `tests/` y `docs/` no quedan al alcance del agente (la tabla de referencia de `eval` ni siquiera está en el repo: vive aparte, y se pasa con `--reference <ruta>`; el test que la lee usa `IA_EVAL_REFERENCE`). Volver a correrlo no rompe
@@ -32,7 +34,8 @@ muestra la ayuda y un argumento desconocido sale con 2.
 
 **Un solo lugar para los dos hosts.** Cursor lee `~/.claude/skills` por compatibilidad
 (cursor.com/docs/context/skills), así que el instalador no escribe en `~/.agents/skills`: con las dos rutas, Cursor
-cargaría la skill dos veces.
+cargaría la skill dos veces. Por la misma razón, `--cursor` la pone en `~/.cursor/skills` **en vez de** `~/.claude/skills`:
+si el instalador encuentra la skill en la otra carpeta, no enlaza nada, lo avisa (`refusing to link …: Cursor would load the skill twice`) y sale con 1.
 
 **Pendiente de verificar:** que en una sesión de `cursor-agent` la skill aparezca listada exactamente una vez después de
 `./install.sh`. Todavía no se midió; cuando se mida, va acá con la fecha y la versión de Cursor.

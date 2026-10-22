@@ -49,7 +49,7 @@ recorrido entero está en el [showcase](docs/showcase.md#4-los-dos-reportes).
 ## En tres comandos
 
 ```bash
-cd <ruta-a-tu-clon>/inherited-audit && ./install.sh   # enlaza skill/ en ~/.claude/skills
+cd <ruta-a-tu-clon>/inherited-audit && ./install.sh   # enlaza skill/ en ~/.claude/skills (--cursor: en ~/.cursor/skills)
 python3 ~/.claude/skills/inherited-audit/ia.py --help
 python3 ~/.claude/skills/inherited-audit/ia.py status --run <carpeta-de-la-corrida>
 ```

@@ -70,7 +70,7 @@ decides what to run.
 ## The CLI and where it lives
 
 `<skill-dir>` is the folder that contains this SKILL.md (the path you loaded it from, for example
-`~/.claude/skills/inherited-audit`). Always call the CLI by that absolute path, from any working directory:
+`~/.claude/skills/inherited-audit`, or `~/.cursor/skills/inherited-audit` for a Cursor-only install). Always call the CLI by that absolute path, from any working directory:
 
 ```bash
 python3 <skill-dir>/ia.py status --run <run-dir>
