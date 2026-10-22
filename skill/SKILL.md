@@ -1,13 +1,13 @@
 ---
 name: inherited-audit
-description: Use when you inherit a system (frontend and backend) you did not build and must audit it before building on it: bugs, race conditions and distributed-systems flaws proven by failing tests, missing unit and e2e tests with local infrastructure, and code-quality and architecture findings, delivered as two self-contained HTML reports for the owning team. Resumable across sessions and hosts; runs on Claude Code and Cursor. Not for reviewing a single diff (use /code-review).
+description: Use when you inherit a system you did not build (one or more repos: services, frontends, workers, CLIs or libraries, in TypeScript/JavaScript, Python, Java or Kotlin with Spring, Go, or another stack) and must audit it before building on it: bugs, race conditions and distributed-systems flaws proven by failing tests, missing unit and e2e tests with local infrastructure, and code-quality and architecture findings, delivered as two self-contained HTML reports for the owning team. Resumable across sessions and hosts; runs on Claude Code and Cursor. Not for reviewing a single diff (use /code-review).
 compatibility: python3 3.9+ (standard library only) and git 2.38+. Optional workers are listed in references/workers.md.
 ---
 
 # inherited-audit
 
-You direct an audit of a system someone else built (one or more repos, frontend and backend) and deliver two
-self-contained HTML reports for the team that owns it:
+You direct an audit of a system someone else built (one or more repos: a backend, a frontend, both, or a worker,
+CLI or library) and deliver two self-contained HTML reports for the team that owns it:
 
 1. **Correctness:** bugs, races, distributed-systems flaws, security, supply chain and container hardening, each code
    finding proven by a test that fails at the pinned base.
@@ -24,6 +24,15 @@ prompts where nothing good exists. The `ia` CLI does the mechanical parts and ne
 
 Use it when someone hands over a system to build on and wants to know what they are standing on: "audit this repo
 before we start", "what is broken in this inherited backend", "find races and missing tests in this system".
+
+The shape of the system only changes which parts apply, never whether the audit runs:
+
+- **One repo or several**, any alias names. **Backend, worker, CLI or library:** quality lenses 1 and 2; e2e through
+  the real entry point (HTTP with emulators, the command, the queue, the public API).
+- **Frontend:** lenses 3 and 4; e2e in the browser; a races cell on a module with no I/O, shared state or
+  background work is `--result n/a --note "<why>"`, not ten empty topics.
+- **Stacks:** `detect` knows TypeScript/JavaScript, Python, Java/Kotlin (Maven, Gradle, Spring Boot) and Go; another
+  stack still runs, with its test command set by `baseline --set` and its modules by `set modules.<ALIAS>=[...]`.
 
 Not for:
 
@@ -205,10 +214,13 @@ python3 <skill-dir>/ia.py step --run <run-dir> correctness in_progress
      Code's `run_in_background`, a separate Cursor terminal) or pass a `--timeout` below that limit. If the host
      stops it anyway, `ia` stops the suite, removes the worktree and exits 143 (SIGTERM) or 129 (SIGHUP); run it
      again.
-  5. `detect` also records `manifest.modules`: the modules of each repo (the folders under `src/modules`,
-     `src/features`, `src/app`, `app`, `src/components`, and every other folder of `src/`). Steps 1 and 2 are
-     closed against them (see "Coverage map" below); if the inventory shows modules `detect` missed, fix that before
-     step 1.
+  5. `detect` also records `manifest.modules`, the modules of each repo, by stack (the layouts are in
+     `references/checklist.md`, step 0). Steps 1 and 2 are
+     closed against them (see "Coverage map" below). If the inventory shows that `detect` cut the modules wrong
+     (missed some, or one module is really several), replace that alias's list before step 1:
+     `ia.py set --run <run-dir> 'modules.<ALIAS>=["internal/orders","internal/billing","cmd/api"]'`. Each path is a
+     directory at the pinned base, relative to the alias root (`<dir>/.` for the files directly in a directory); a
+     later `detect` keeps the list (`manifest.modules_edited`).
   6. Run the baseline-inventory pass: modules, entry points, external dependencies, data stores. From it, choose the
      categories and record their order, and note real strengths, with `ia.py set` (never edit `manifest.json` by
      hand): `ia.py set --run <run-dir> 'sections.correctness=["auth","orders"]' 'sections.quality=["api"]'
@@ -247,9 +259,12 @@ python3 <skill-dir>/ia.py coverage add --run <run-dir> --pass races-distributed 
 python3 <skill-dir>/ia.py coverage status --run <run-dir>
 ```
 
-  `--result` is `found` or `nothing`; `--module` can repeat. A `races-distributed` cell is complete only with
+  `--result` is `found`, `nothing` or `n/a`; `--module` can repeat. A `races-distributed` cell is complete only with
   `--topics` listing every topic of the pass (1 to 10), also when the result is `nothing`: a topic you did not check is
-  not covered. Last write wins. `coverage status` prints the grid and the open cells (add `--pass` to see one pass).
+  not covered. `n/a` says the pass does not apply to the module (a races pass on presentational UI code with no I/O
+  and no shared state, a security pass on generated code): it needs `--note` with the reason, takes no `--topics`,
+  and the report lists it apart from `nothing`, which means "looked and found nothing". Never use it to skip work
+  that applies. Last write wins. `coverage status` prints the grid and the open cells (add `--pass` to see one pass).
 - Closes: `ia.py step --run <run-dir> correctness done`, which refuses and lists the open cells. If the person
   decides a module stays out, `ia.py step --run <run-dir> correctness done --force-open "<reason>"` closes anyway,
   records the reason and the open cells in `manifest.coverage_waivers`, and the report shows it in "How it was done".
@@ -303,7 +318,7 @@ python3 <skill-dir>/ia.py finding set --run <run-dir> C-07 verdict=confirmed con
 - Each finding: `report` `quality`, a `suggestion`, an `effort`, and `measurement` when it is quantitative. The
   resilience and lying-documentation dimensions belong here.
 - Record each module the lenses visited with `ia.py coverage add --run <run-dir> --pass quality-lenses --module
-  ALIAS/path --result found|nothing`.
+  ALIAS/path --result found|nothing|n/a` (`n/a` with `--note`).
 - Closes: `ia.py step --run <run-dir> quality done`, which refuses while a module has no `quality-lenses` cell;
   `--force-open "<reason>"` works as in step 1.
 

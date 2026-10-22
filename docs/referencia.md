@@ -79,3 +79,5 @@ reportes).
 | 1 | El comando encontró problemas (los imprime) |
 | 2 | Error de uso |
 | 3 | Una herramienta externa falló o no está |
+| 4 | Falló `ia.py` mismo (un error que no esperaba): imprime una línea; con `IA_DEBUG=1`, el traceback. No hay que esquivarlo: se reporta |
+| 128+N | Una señal N lo detuvo después de limpiar (143 SIGTERM, 129 SIGHUP, 130 Ctrl-C): se vuelve a correr |

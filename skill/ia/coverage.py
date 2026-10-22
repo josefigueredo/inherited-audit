@@ -16,7 +16,10 @@ REQUIRED: Dict[str, Tuple[str, ...]] = {
 }
 # The synthetic ROOT alias holds config, CI and container files: no general-correctness or races pass applies there.
 ROOT_PASSES: Tuple[str, ...] = ("security", "quality-lenses")
-RESULTS: Tuple[str, ...] = ("found", "nothing")
+NOT_APPLICABLE = "n/a"
+# `n/a`: the pass does not apply to the module (a races pass on pure UI code); it needs a note saying why, needs no
+# topics, and the report lists it apart from `nothing` (looked and found nothing).
+RESULTS: Tuple[str, ...] = ("found", "nothing", NOT_APPLICABLE)
 
 
 def modules_of(manifest: dict) -> List[str]:
@@ -61,6 +64,10 @@ def add_cells(run: Path, pass_name: str, modules: List[str], result: str, topics
         raise UsageError(f"unknown pass {pass_name!r}; expected one of {', '.join(PASSES)}")
     if result not in RESULTS:
         raise UsageError(f"--result must be one of {', '.join(RESULTS)}, got {result!r}")
+    if result == NOT_APPLICABLE and not note.strip():
+        raise UsageError("--result n/a needs --note saying why the pass does not apply to the module")
+    if result == NOT_APPLICABLE and topics:
+        raise UsageError("--result n/a takes no --topics: a pass that does not apply walks none")
     with transaction(run) as manifest:
         known = modules_of(manifest)
         if not known:
@@ -83,7 +90,7 @@ def cell_gap(manifest: dict, pass_name: str, module: str) -> Optional[str]:
     cell = ((manifest.get("coverage") or {}).get(pass_name) or {}).get(module)
     if not isinstance(cell, dict) or cell.get("result") not in RESULTS:
         return "not visited"
-    if pass_name == RACES_PASS:
+    if pass_name == RACES_PASS and cell["result"] != NOT_APPLICABLE:
         have = set(cell.get("topics") or [])
         missing = [n for n in range(1, RACES_TOPICS + 1) if n not in have]
         if missing:
@@ -123,6 +130,17 @@ def guard_step(manifest: dict, step: str, force_open: Optional[str]) -> None:
         {"step": step, "reason": force_open, "open": [f"{m} / {p}" for m, p, _ in gaps]})
 
 
+def not_applicable(manifest: dict, passes: Tuple[str, ...]) -> List[Tuple[str, str, str]]:
+    """(module, pass, note) for each current module whose cell of one of `passes` says the pass does not apply."""
+    out = []
+    for module in modules_of(manifest):
+        for pass_name in passes:
+            cell = ((manifest.get("coverage") or {}).get(pass_name) or {}).get(module)
+            if isinstance(cell, dict) and cell.get("result") == NOT_APPLICABLE:
+                out.append((module, pass_name, str(cell.get("note") or "")))
+    return out
+
+
 def _glyph(manifest: dict, pass_name: str, module: str) -> str:
     cell = ((manifest.get("coverage") or {}).get(pass_name) or {}).get(module)
     if not required(manifest, module, pass_name) and not isinstance(cell, dict):
@@ -141,7 +159,7 @@ def status_text(run: Path, pass_name: Optional[str] = None) -> str:
     if not mods:
         return "no modules recorded (run `ia.py detect`); nothing to cover"
     width = max(len(m) for m in mods)
-    lines = ["module x pass (found | nothing | partial | . = not visited | - = not required):",
+    lines = ["module x pass (found | nothing | n/a | partial | . = not visited | - = not required):",
              " " * width + "  " + "  ".join(passes)]
     for m in mods:
         lines.append(m.ljust(width) + "  " + "  ".join(_glyph(manifest, p, m).ljust(len(p)) for p in passes))

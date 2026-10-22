@@ -45,7 +45,7 @@ COMMANDS = (
     ("render", "write the two self-contained HTML reports"),
     ("eval", "score a run against an answer key of known findings"),
     ("coverage", "record and show which passes visited which modules (add, status)"),
-    ("set", "set manifest keys: host, lang, author_model, options.publish, sections, strengths, baseline.<ALIAS>.tests_branch, baseline.<ALIAS>.result.*"),
+    ("set", "set manifest keys: host, lang, author_model, options.publish, sections, strengths, baseline.<ALIAS>.tests_branch, baseline.<ALIAS>.result.*, modules.<ALIAS>"),
 )
 
 
@@ -181,15 +181,20 @@ def _detect_locked(args: argparse.Namespace) -> int:
         names += [n for n in plan["measure"] if n not in names]
         hint = (f"  (suggested install, ask first: {' '.join(plan['install_cmd'])})"
                 if plan["deps"] == "none" and plan.get("install_cmd") else "")
-        print(f"{repo['alias']}: {plan['stack']}  test: {' '.join(plan['test_cmd']) if plan['test_cmd'] else '-'}"
+        stack = plan["stack"] + (f" ({plan['framework']})" if plan.get("framework") else "")
+        print(f"{repo['alias']}: {stack}  test: {' '.join(plan['test_cmd']) if plan['test_cmd'] else '-'}"
               f"  deps: {plan['deps']}{hint}" + ("" if plan["measured"] else "  (unmeasured stack)"))
+    old_modules = manifest.get("modules") if isinstance(manifest.get("modules"), dict) else {}
+    kept = [a for a in manifest.get("modules_edited") or [] if isinstance(a, str) and old_modules.get(a)]
     manifest["modules"] = {r["alias"]: (detectmod.detect_root_modules(Path(r["path"])) if r.get("root")
                                         else detectmod.detect_modules(Path(r["path"]) / r["subdir"]))
                            for r in manifest["repos"]}
     manifest["modules"] = {a: m for a, m in manifest["modules"].items() if m or a not in
                            {r["alias"] for r in manifest["repos"] if r.get("root")}}
+    for alias in kept:  # set by hand with `ia.py set modules.<ALIAS>=[...]`: detect never overwrites them
+        manifest["modules"][alias] = old_modules[alias]
     for alias, mods in manifest["modules"].items():
-        print(f"{alias}: {len(mods)} modules")
+        print(f"{alias}: {len(mods)} modules" + ("  (set by hand, kept)" if alias in kept else ""))
     manifest["tools"] = detectmod.tool_status(names)
     hosts = list(detectmod.WORKERS) if manifest["host"] not in detectmod.WORKERS else [manifest["host"]]
     roots = [Path(r["path"]) / r["subdir"] for r in manifest["repos"]]

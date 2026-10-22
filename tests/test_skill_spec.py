@@ -35,5 +35,32 @@ class SkillSpecTest(unittest.TestCase):
         self.assertEqual((cli.OK, cli.FINDINGS, cli.USAGE, cli.FAILED, cli.INTERNAL), (0, 1, 2, 3, 4))
 
 
+class ScopeDocsTest(unittest.TestCase):
+    """The skill is not tied to a frontend plus a backend: any set of repos, with the stacks detect knows named."""
+
+    def read(self, rel: str) -> str:
+        return (SKILL.parent / rel).read_text(encoding="utf-8")
+
+    def test_description_is_not_limited_to_frontend_and_backend(self):
+        description = SKILL_MD.split("description:", 1)[1].split("\n", 1)[0]
+        self.assertNotIn("frontend and backend", description)
+        for word in ("services", "CLIs", "libraries", "Java", "Kotlin", "Go"):
+            self.assertIn(word, description)
+
+    def test_checklist_names_every_detected_stack(self):
+        text = self.read("skill/references/checklist.md")
+        for stack in ("TypeScript/JavaScript", "Python", "Java/Kotlin", "Go"):
+            self.assertIn(stack, text)
+
+    def test_readme_is_not_limited_to_front_and_back(self):
+        self.assertNotIn("(front y back)", self.read("README.md"))
+
+    def test_exit_code_tables_list_4_and_signals(self):
+        for rel in ("docs/referencia.md", "docs/instalacion-detallada.md"):
+            text = self.read(rel)
+            self.assertRegex(text, r"\| 4 \|", rel)
+            self.assertIn("128", text, rel)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -305,6 +305,95 @@ class StepGuardTest(unittest.TestCase):
         self.assertEqual(res.stderr, "")
 
 
+class SetModulesTest(unittest.TestCase):
+    def set_(self, out, value):
+        return run_cli(["set", "--run", str(out), f"modules.BACK={value}"])
+
+    def test_set_replaces_the_modules_of_an_alias_sorted(self):
+        out = new_run()
+        res = self.set_(out, '["src/modules/users", "src/modules", "src/."]')
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(runmod.load(out)["modules"]["BACK"], ["src/.", "src/modules", "src/modules/users"])
+        self.assertIn("BACK/src/modules", coverage.modules_of(runmod.load(out)))
+
+    def test_paths_must_be_directories_at_the_pinned_base(self):
+        out = new_run()
+        for bad in ('["src/nope"]', '["src/lib/c.ts"]', '["../x"]', '["/abs"]', '[]', '["a", "a"]', '"src"', '[""]'):
+            res = self.set_(out, bad)
+            self.assertEqual(res.returncode, 2, (bad, res.stderr))
+        self.assertEqual(runmod.load(out)["modules"]["BACK"], MODS_PATHS)
+
+    def test_a_dir_only_in_the_worktree_is_refused(self):
+        out = new_run()
+        repo = Path(runmod.load(out)["repos"][0]["path"])
+        write_tree(repo, {"src/later/x.ts": "x"})
+        self.assertEqual(self.set_(out, '["src/later"]').returncode, 2)
+
+    def test_unknown_alias_is_refused(self):
+        out = new_run()
+        res = run_cli(["set", "--run", str(out), 'modules.NOPE=["src"]'])
+        self.assertEqual(res.returncode, 2)
+        self.assertIn("NOPE", res.stderr)
+
+    def test_detect_keeps_modules_set_by_hand(self):
+        out = new_run()
+        self.assertEqual(self.set_(out, '["src/modules"]').returncode, 0)
+        self.assertEqual(run_cli(["detect", "--run", str(out)]).returncode, 0)
+        manifest = runmod.load(out)
+        self.assertEqual(manifest["modules"]["BACK"], ["src/modules"])
+        self.assertEqual(manifest["modules_edited"], ["BACK"])
+
+    def test_subdir_alias_paths_are_relative_to_the_subdir(self):
+        files = {(k if k == ".gitignore" else f"api/{k}"): v for k, v in FILES.items()}
+        out = new_run(files, subdir="api")
+        self.assertEqual(self.set_(out, '["src/lib"]').returncode, 0)
+        self.assertEqual(self.set_(out, '["api/src/lib"]').returncode, 2)
+
+
+MODS_PATHS = ["src/lib", "src/modules/orders", "src/modules/users"]
+
+
+class NotApplicableTest(unittest.TestCase):
+    def test_not_applicable_needs_a_note(self):
+        out = new_run()
+        res = add(out, "races-distributed", "BACK/src/lib", "n/a")
+        self.assertEqual(res.returncode, 2)
+        self.assertIn("--note", res.stderr)
+
+    def test_not_applicable_closes_a_races_cell_without_topics(self):
+        out = new_run()
+        fill_correctness(out, MODS)
+        res = add(out, "races-distributed", "BACK/src/lib", "n/a", note="pure UI helpers: no I/O, no shared state")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        res = run_cli(["step", "--run", str(out), "correctness", "done"])
+        self.assertEqual(res.returncode, 0, res.stderr)
+        cell = runmod.load(out)["coverage"]["races-distributed"]["BACK/src/lib"]
+        self.assertEqual(cell, {"result": "n/a", "note": "pure UI helpers: no I/O, no shared state"})
+
+    def test_not_applicable_refuses_topics(self):
+        out = new_run()
+        res = add(out, "races-distributed", "BACK/src/lib", "n/a", topics="1,2", note="x")
+        self.assertEqual(res.returncode, 2)
+
+    def test_status_shows_not_applicable(self):
+        out = new_run()
+        add(out, "security", "BACK/src/lib", "n/a", note="generated code")
+        res = run_cli(["coverage", "status", "--run", str(out), "--pass", "security"])
+        self.assertIn("n/a", res.stdout.splitlines()[2])
+
+    def test_render_lists_not_applicable_cells_with_their_note(self):
+        repo = {"alias": "BACK", "path": "/r", "sha": "a" * 40, "remote": "", "subdir": ""}
+        manifest = {"repos": [repo], "filter": {}, "modules": {"BACK": ["src/lib"]},
+                    "coverage": {"races-distributed": {"BACK/src/lib": {"result": "n/a", "note": "no shared state"}},
+                                 "security": {"BACK/src/lib": {"result": "nothing"}}}}
+        html = rendermod._how(manifest, "correctness", [], rendermod.LABELS["es"])
+        self.assertIn(rendermod.LABELS["es"]["how_not_applicable"], html)
+        self.assertIn("BACK/src/lib", html)
+        self.assertIn("no shared state", html)
+        quality = rendermod._how(manifest, "quality", [], rendermod.LABELS["en"])
+        self.assertNotIn("no shared state", quality)
+
+
 class RenderWaiverTest(unittest.TestCase):
     def test_waivers_are_shown_in_how_it_was_done(self):
         manifest = {"repos": [], "filter": {}, "coverage_waivers": [
@@ -325,8 +414,16 @@ class DocsTest(unittest.TestCase):
 
     def test_skill_md_teaches_the_coverage_map(self):
         text = self.read("SKILL.md")
-        for needle in ("ia.py coverage add", "ia.py coverage status", "--force-open", "--topics"):
+        for needle in ("ia.py coverage add", "ia.py coverage status", "--force-open", "--topics", "`n/a`"):
             self.assertIn(needle, text)
+
+    def test_setting_modules_is_documented(self):
+        self.assertIn("ia.py set --run <run-dir> 'modules.<ALIAS>=", self.read("SKILL.md"))
+        self.assertIn("`modules_edited`", self.read("references/schema.md"))
+
+    def test_not_applicable_is_documented_wherever_results_are(self):
+        for rel in ("references/checklist.md", "references/schema.md", "references/passes/races-distributed.md"):
+            self.assertIn("n/a", self.read(rel), rel)
 
     def test_checklist_and_schema_describe_it(self):
         self.assertIn("coverage", self.read("references/checklist.md"))

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
 from . import cites as citesmod
+from . import coverage as coveragemod
 from . import findings as findingsmod
 from . import hygiene as hygienemod
 from . import run as runmod
@@ -68,6 +69,7 @@ LABELS: Dict[str, Dict[str, str]] = {
         "how_contrast": "Un segundo modelo revisó cada hallazgo; si es de la misma familia que el autor, el contraste "
                         "vale menos y se dice.",
         "how_waivers": "Se cerró el paso con módulos sin revisar, y este fue el motivo:",
+        "how_not_applicable": "Revisiones que no aplican a un módulo, y por qué:",
         "how_counts": "Lo que pasó el filtro:", "report_correctness": "Corrección", "report_quality": "Calidad",
         "in_history": "en el historial (commit {commit})",
         "no_file": "No se pudo leer {path} en {sha}.",
@@ -120,6 +122,7 @@ LABELS: Dict[str, Dict[str, str]] = {
         "how_contrast": "A second model reviewed each finding; when it is from the same family as the author the "
                         "contrast is weaker, and that is stated.",
         "how_waivers": "A step was closed with modules not reviewed, and this is why:",
+        "how_not_applicable": "Reviews that do not apply to a module, and why:",
         "how_counts": "What passed the filter:", "report_correctness": "Correctness", "report_quality": "Quality",
         "in_history": "in history (commit {commit})",
         "no_file": "Could not read {path} at {sha}.",
@@ -446,6 +449,10 @@ def _how(manifest: dict, report: str, everything: List[dict], L: Dict[str, str])
                         f'</strong>: {esc(w.get("reason"))} <span class="ref">({esc("; ".join(open_cell_label(c, lang) for c in w.get("open") or []))})</span></li>'
                         for w in waivers)
         parts.append(f"<p>{esc(L['how_waivers'])}</p><ul>{items}</ul>")
+    skipped = coveragemod.not_applicable(manifest, coveragemod.REQUIRED.get(report, ()))
+    if skipped:
+        items = "".join(f'<li>{esc(open_cell_label(f"{m} / {p}", lang))}: {esc(note)}</li>' for m, p, note in skipped)
+        parts.append(f"<p>{esc(L['how_not_applicable'])}</p><ul>{items}</ul>")
     counts = manifest["filter"].get("counts") or {}
     items = "".join(f'<li>{esc(L["report_" + r])}: {esc(L["shown_of"].format(shown=c["shown"], total=c["total"]))}</li>'
                     for r, c in ((r, counts.get(r)) for r in findingsmod.REPORTS)

@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Tuple
 from . import run as runmod
 
 TAIL_LINES = 200
-PLAN_KEYS = ("stack", "test_cmd", "coverage_cmd", "measure", "measured", "env", "pre", "deps", "deps_dirs",
+PLAN_KEYS = ("stack", "test_cmd", "coverage_cmd", "measure", "measured", "env", "pre", "deps", "deps_dirs", "junit",
              "install_cmd")
 DEPS_MODES = ("symlink", "install", "none")
 # Non-interactive runs: npx must not download a missing package on its own (the plan's env can override).
@@ -29,6 +29,11 @@ _UNITTEST_RAN = re.compile(r"^Ran (\d+) tests? in ")
 _UNITTEST_BAD = re.compile(r"(?:^|[(,]\s*)(failures|errors)=(\d+)")
 _UNITTEST_FAILED = re.compile(r"^FAILED \((.*)\)")
 _COUNT = re.compile(r"(\d+) ([A-Za-z]+)")
+_MAVEN = re.compile(r"^(?:\[(?:INFO|WARNING|ERROR)\]\s+)?Tests run: (\d+), Failures: (\d+), Errors: (\d+), "
+                    r"Skipped: (\d+)\s*$")
+_GRADLE = re.compile(r"^(\d+) tests? completed(?:, (\d+) failed)?(?:, (\d+) skipped)?")
+_GO_BUILD_FAILED = re.compile(r"^FAIL\s+(\S+)\s+\[(?:build|setup) failed\]")
+_COVER_GO = re.compile(r"^total:\s+\(statements\)\s+([\d.]+)%")
 _COVER_ALL = re.compile(r"^\s*All files\s*\|\s*([\d.]+)")
 _COVER_TOTAL = re.compile(r"^TOTAL\b.*?([\d.]+)%\s*$")
 
@@ -40,16 +45,71 @@ def _counts(chunk: str) -> Dict[str, int]:
     return found
 
 
+def _go_counts(lines: List[str]) -> Optional[Tuple[int, int]]:
+    """(passed, failed) from `go test -json` events, or None when the output has none.
+
+    Top-level tests only (a subtest is part of its test); a package that fails with no failing test (build error,
+    panic in TestMain, setup failure) counts as one failure, as does a `FAIL pkg [build failed]` text line."""
+    passed = failed = 0
+    seen = False
+    test_failed: set = set()
+    package_failed: set = set()
+    for line in lines:
+        m = _GO_BUILD_FAILED.match(line)
+        if m:
+            package_failed.add(m.group(1))
+            continue
+        if not line.startswith("{"):
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict) or "Action" not in event:
+            continue
+        seen = True
+        action, test, package = event.get("Action"), event.get("Test"), event.get("Package")
+        if test and "/" not in str(test):
+            if action == "pass":
+                passed += 1
+            elif action == "fail":
+                failed += 1
+                test_failed.add(package)
+        elif not test and action == "fail":
+            package_failed.add(package)
+    if not seen and not package_failed:
+        return None
+    return passed, failed + len(package_failed - test_failed)
+
+
 def parse_summary(text: str) -> dict:
     """Reads the runner summary from the last lines of a test output."""
     result = {"passed": None, "failed": None, "total": None, "coverage": None, "runner": None}
-    lines = _ANSI.sub("", text).splitlines()[-TAIL_LINES:]
+    every = _ANSI.sub("", text).splitlines()
+    lines = every[-TAIL_LINES:]
     for line in lines:
-        m = _COVER_ALL.match(line) or _COVER_TOTAL.match(line)
+        m = _COVER_ALL.match(line) or _COVER_TOTAL.match(line) or _COVER_GO.match(line)
         if m:
             result["coverage"] = float(m.group(1))
+    go = _go_counts(every)
+    if go is not None:
+        result.update(passed=go[0], failed=go[1], total=go[0] + go[1], runner="go")
+        return result
+    # Maven prints one summary per module of a reactor build, anywhere in the output: add them all up.
+    maven = [tuple(map(int, m.groups())) for m in map(_MAVEN.match, every) if m]
+    if maven:
+        run, failures, errors, skipped = (sum(col) for col in zip(*maven))
+        result.update(passed=max(run - failures - errors - skipped, 0), failed=failures + errors, runner="maven")
+        result["total"] = result["passed"] + result["failed"]
+        return result
     for i in range(len(lines) - 1, -1, -1):
         line = lines[i]
+        m = _GRADLE.match(line)
+        if m:
+            done, failed, skipped = int(m.group(1)), int(m.group(2) or 0), int(m.group(3) or 0)
+            passed = max(done - failed - skipped, 0)
+            result.update(passed=passed, failed=failed, total=passed + failed, runner="gradle")
+            return result
         m = _JEST.match(line)
         if m:
             c = _counts(m.group(1))
@@ -80,6 +140,62 @@ def parse_summary(text: str) -> dict:
             result.update(passed=max(total - failed, 0), failed=failed, total=total, runner="unittest")
             return result
     return result
+
+
+JUNIT_MAX_BYTES = 50 * 1024 * 1024
+
+
+def _int(value: Optional[str]) -> int:
+    try:
+        return int(float(value or 0))
+    except ValueError:
+        return 0
+
+
+def parse_junit(cwd: Path, globs: List[str]) -> Optional[dict]:
+    """Counts summed over the JUnit XML reports under `cwd` that match `globs`; None when none could be read.
+
+    The files come from the audited repo's build: anything with a DTD or entity declaration (an XML bomb or an
+    external entity), past the size cap, outside `cwd` or not well formed is listed in `skipped_files`, never parsed.
+    Only leaf <testsuite> elements count, so a <testsuites> or nested aggregate is not added twice.
+    """
+    import xml.etree.ElementTree as ET  # local: only JUnit-producing stacks need it
+
+    base = Path(cwd).resolve()
+    paths: List[Path] = []
+    for pattern in globs:
+        for path in sorted(Path(cwd).glob(pattern)):
+            if path.is_file() and path not in paths:
+                paths.append(path)
+    if not paths:
+        return None
+    run = failures = errors = skipped = 0
+    read, refused = 0, []
+    for path in paths:
+        rel = path.relative_to(cwd).as_posix()
+        try:
+            path.resolve().relative_to(base)
+            if path.stat().st_size > JUNIT_MAX_BYTES:
+                raise ValueError("too large")
+            data = path.read_bytes()
+            if b"<!DOCTYPE" in data or b"<!ENTITY" in data:
+                raise ValueError("declares a DTD or entities")
+            root = ET.fromstring(data)
+        except (OSError, ValueError, ET.ParseError):
+            refused.append(rel)
+            continue
+        suites = [s for s in root.iter("testsuite") if s.find(".//testsuite") is None]
+        for suite in suites:
+            run += _int(suite.get("tests"))
+            failures += _int(suite.get("failures"))
+            errors += _int(suite.get("errors"))
+            skipped += _int(suite.get("skipped") or suite.get("disabled"))
+        read += 1
+    if not read:
+        return None
+    passed = max(run - failures - errors - skipped, 0)
+    return {"passed": passed, "failed": failures + errors, "total": passed + failures + errors, "runner": "junit-xml",
+            "files": read, "skipped_files": refused}
 
 
 def _empty_result(**over) -> dict:
@@ -228,6 +344,7 @@ def run_baseline(run: Path, alias: str, timeout: int) -> dict:
     suite_text = ""
     coverage: Optional[float] = None
     coverage_error = ""
+    junit: Optional[dict] = None
     groups: List[int] = []
     try:
         runmod._git(repo_path, "worktree", "add", "--detach", str(wt), repo["sha"])
@@ -260,9 +377,11 @@ def run_baseline(run: Path, alias: str, timeout: int) -> dict:
                 error = f"{kind} command `{' '.join(cmd)}` exited {code}"
                 exit_code = code
                 break
+        if ran_suite and plan.get("junit"):  # read before the worktree goes
+            junit = parse_junit(cwd, list(plan["junit"]))
         cov_cmd = list(plan.get("coverage_cmd") or [])
         if ran_suite and cov_cmd:
-            counts = parse_summary(suite_text)
+            counts = junit or parse_summary(suite_text)
             if counts["failed"] == 0 and counts["total"] is not None:
                 coverage, coverage_error = _run_coverage(cov_cmd, cwd, env, deadline, timeout, chunks, groups)
             else:
@@ -281,17 +400,27 @@ def run_baseline(run: Path, alias: str, timeout: int) -> dict:
     from . import hygiene  # local: keep the import graph acyclic
     (run / out_rel).write_text(hygiene.mask_text(text), encoding="utf-8", errors="replace")
     parsed = parse_summary(suite_text) if ran_suite else {}
+    if junit:
+        parsed.update({k: junit[k] for k in ("passed", "failed", "total", "runner")})
     if ran_suite:
         parsed["coverage"] = coverage if coverage is not None else parsed.get("coverage")
     result = _empty_result(output=out_rel, exit_code=exit_code, timed_out=timed_out, measured=ran_suite, **parsed)
     if ran_suite:
         result["parsed"] = result["passed"] is not None
+    if junit:
+        result["junit_files"] = junit["files"]
+        if junit["skipped_files"]:
+            result["junit_skipped"] = junit["skipped_files"]
     if error:
         result["error"] = error
     if coverage_error:
         result["coverage_error"] = coverage_error
     _save_result(run, alias, result)
     return result
+
+
+def _relative_glob(pattern: str) -> bool:
+    return bool(pattern) and not pattern.startswith("/") and ".." not in pattern.split("/")
 
 
 def _strs(v: object) -> bool:
@@ -304,6 +433,7 @@ _SHAPES = {
     "test_cmd": lambda v: v is None or _strs(v),
     "coverage_cmd": lambda v: v is None or _strs(v),
     "install_cmd": lambda v: v is None or _strs(v),
+    "junit": lambda v: _strs(v) and all(_relative_glob(g) for g in v),
     "deps_dirs": _strs,
     "measure": _strs,
     "measured": lambda v: isinstance(v, bool),
@@ -311,6 +441,7 @@ _SHAPES = {
 _SHAPE_HELP = {
     "env": "an object of strings", "pre": "a list of lists of strings", "test_cmd": "a list of strings or null",
     "coverage_cmd": "a list of strings or null", "install_cmd": "a list of strings or null",
+    "junit": "a list of globs relative to the suite folder, without '..'",
     "deps_dirs": "a list of strings", "measure": "a list of strings", "measured": "true or false",
 }
 

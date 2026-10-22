@@ -1,7 +1,8 @@
 # inherited-audit
 
-Una skill para Claude Code y Cursor, con un CLI (`ia.py`), para auditar un sistema que heredaste (front y back) antes de
-construir encima. Dirige la auditoría de punta a punta y entrega dos reportes HTML autocontenidos para el equipo dueño:
+Una skill para Claude Code y Cursor, con un CLI (`ia.py`), para auditar un sistema que heredaste antes de construir encima:
+uno o varios repos (back, front, workers, CLIs o librerías) en TypeScript/JavaScript, Python, Java o Kotlin (con
+Spring o sin él), Go u otro stack. Dirige la auditoría de punta a punta y entrega dos reportes HTML autocontenidos para el equipo dueño:
 uno de **correctitud** (bugs, condiciones de carrera, fallas de sistemas distribuidos, seguridad, cada hallazgo de
 código probado con un test que falla en la base) y uno de **calidad y arquitectura** (cada hallazgo con una sugerencia
 y, si es un número, con la medición de una herramienta). En el camino suma los tests unitarios y e2e que faltan, en una
@@ -10,6 +11,7 @@ rama aparte.
 | Le decís al agente… | Y la skill… |
 |---|---|
 | *«Auditá este sistema antes de que empecemos: el back está en ~/w/api y el front en ~/w/web»* | fija el commit de cada repo, mide la suite, pregunta una sola vez qué obreros faltan instalar y recorre el checklist hasta los dos reportes |
+| *«Auditá este servicio de Spring Boot que heredamos: ~/w/pagos»* | detecta Maven o Gradle, corre la suite sin bajar dependencias (si falta la caché, pregunta antes de instalar), cuenta los tests desde los reportes JUnit y arma los módulos por paquete |
 | *«Retomá la auditoría de tienda»* | lee `manifest.json` de la corrida y sigue en el primer paso que no está hecho, en Claude Code o en Cursor |
 | *«¿Qué quedó afuera del reporte y por qué?»* | corre el filtro y te dice cuántos hallazgos se muestran de cuántos, y qué regla dejó afuera al resto |
 
