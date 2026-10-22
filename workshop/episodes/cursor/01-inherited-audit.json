@@ -5,7 +5,7 @@
   "title": "inherited-audit",
   "pitch": {
     "ask": "Auditá este sistema antes de que empecemos: el back está en ~/w/api y el front en ~/w/web",
-    "does": "Fija el commit de cada repo, mide la suite, pregunta una sola vez qué obreros faltan instalar y recorre el checklist hasta los dos reportes."
+    "does": "Fija el commit de cada repo, mide la suite, pregunta una sola vez qué workers faltan instalar y recorre el checklist hasta los dos reportes."
   },
   "skill": {
     "repo": "inherited-audit",
@@ -29,6 +29,78 @@
     "model": "GPT-5.6 Terra"
   },
   "chapters": [
+    {
+      "id": "que-resuelve",
+      "title": "Qué resuelve y cómo",
+      "subtitle": "El problema, las piezas determinísticas y las que no, y cómo se prueba cada hallazgo",
+      "screen": "terminal",
+      "faq": [
+        {
+          "q": "¿Por qué no le pido directamente al modelo que audite el repo?",
+          "a": "Porque te da opiniones distintas en cada corrida. Acá el modelo propone y un CLI sin modelo decide qué entra: test rojo, cita válida, módulo visitado."
+        },
+        {
+          "q": "¿El CLI usa IA?",
+          "a": "No. ia.py es Python con la biblioteca estándar y nunca llama a un modelo."
+        },
+        {
+          "q": "¿Por qué el contraste tiene que ser de otra familia?",
+          "a": "Para que no comparta los puntos ciegos del autor. Si no hay otra, corre igual y el reporte lo dice."
+        }
+      ],
+      "steps": [
+        {
+          "type": "page",
+          "title": "inherited-audit · 1 de 8",
+          "src": "pages/ia-slide-01.html",
+          "source": "inferido",
+          "notes": "Arrancá por el dolor, no por la herramienta: heredaste algo y vas a construir encima. Remarcá que sirve para cualquier forma de sistema y cualquier stack; lo que cambia es qué partes aplican."
+        },
+        {
+          "type": "page",
+          "title": "inherited-audit · 2 de 8",
+          "src": "pages/ia-slide-02.html",
+          "source": "inferido",
+          "notes": "Lo que el equipo dueño recibe son pruebas, no opiniones: un test que falla por hallazgo. Y la fila roja es la que tranquiliza a seguridad: nada sale de tu máquina sin que vos lo decidas."
+        },
+        {
+          "type": "page",
+          "title": "inherited-audit · 3 de 8",
+          "src": "pages/ia-slide-03.html",
+          "source": "inferido",
+          "notes": "La skill no audita: dirige. Cada paso tiene un worker de Cursor o una pasada propia. Mostrá la columna derecha: los pasos que cierran el trabajo son del CLI."
+        },
+        {
+          "type": "page",
+          "title": "inherited-audit · 4 de 8",
+          "src": "pages/ia-slide-04.html",
+          "source": "inferido",
+          "notes": "Esta es la diapositiva clave. El modelo tiene juicio y varía entre corridas; el CLI no. Lo que el modelo encuentra entra solo si el CLI lo deja: esquema válido, test rojo, cita que existe, módulo visitado.",
+          "pause": true
+        },
+        {
+          "type": "page",
+          "title": "inherited-audit · 5 de 8",
+          "src": "pages/ia-slide-05.html",
+          "source": "inferido",
+          "notes": "Seguí los colores: violeta propone, azul decide. La persona aparece dos veces: al principio, para la única pregunta sobre workers, y al final, para recibir los conteos. Nada se publica."
+        },
+        {
+          "type": "page",
+          "title": "inherited-audit · 6 de 8",
+          "src": "pages/ia-slide-06.html",
+          "source": "inferido",
+          "notes": "Rojo por la razón correcta: la aserción falla en el código heredado, no el setup. Cada subagente trabaja en su propio worktree, así varios corren en paralelo sin pisarse."
+        },
+        {
+          "type": "page",
+          "title": "inherited-audit · 7 de 8",
+          "src": "pages/ia-slide-07.html",
+          "source": "inferido",
+          "notes": "Dos controles de modelo antes del filtro. El contraste es de otra familia, para no repetir los mismos puntos ciegos; la verificación la hace alguien que no vio el razonamiento del autor."
+        }
+      ]
+    },
     {
       "id": "instalar",
       "title": "Instalar",
@@ -127,7 +199,7 @@
         },
         {
           "type": "say",
-          "md": "Estoy en **Cursor**, así que uso sus obreros.\n\nUna sola pregunta antes de arrancar: ¿querés que al final deje escritos los textos de issues y PRs (`publish`)? Viene apagado, y aunque lo prendas los publicás vos, nunca yo.",
+          "md": "Estoy en **Cursor**, así que uso sus workers.\n\nUna sola pregunta antes de arrancar: ¿querés que al final deje escritos los textos de issues y PRs (`publish`)? Viene apagado, y aunque lo prendas los publicás vos, nunca yo.",
           "source": "inferido",
           "notes": "Remarcá el «nunca yo»: la skill no publica nada en ningún lado.",
           "pause": true
@@ -168,7 +240,7 @@
         },
         {
           "type": "say",
-          "md": "Te pregunto **una sola vez**. Faltan estos obreros:\n- `brew install semgrep`, `brew install gitleaks` y `brew install osv-scanner`: análisis estático\n- el CLI `agent` de Cursor: el contraste con un modelo de otra familia\n- `/add-plugin superpowers`: tests unitarios\n- `/add-plugin` de wshobson/agents (marketplace de Cursor 2.5+): calidad\n\nLos dos plugins no los puede revisar `detect`; los busqué en esta sesión y no están. Lo que no instales lo cubre una pasada propia de la skill durante toda la corrida. ¿Instalo alguno?",
+          "md": "Te pregunto **una sola vez**. Faltan estos workers:\n- `brew install semgrep`, `brew install gitleaks` y `brew install osv-scanner`: análisis estático\n- el CLI `agent` de Cursor: el contraste con un modelo de otra familia\n- `/add-plugin superpowers`: tests unitarios\n- `/add-plugin` de wshobson/agents (marketplace de Cursor 2.5+): calidad\n\nLos dos plugins no los puede revisar `detect`; los busqué en esta sesión y no están. Lo que no instales lo cubre una pasada propia de la skill durante toda la corrida. ¿Instalo alguno?",
           "source": "inferido",
           "notes": "Es la única pregunta sobre herramientas en toda la corrida, con el comando exacto de cada una; los plugins de Cursor los revisa el agente, porque detect no puede. Si decís que no, la skill no se traba: usa su propia pasada. Funciona con lo que ya tenés.",
           "pause": true
@@ -193,7 +265,7 @@
           "type": "tool",
           "label": "Ran · /review-bugbot, races-distributed y security · API/mi_servicio",
           "source": "inferido",
-          "notes": "Trabajan los obreros: el revisor de bugs de Cursor y dos pasadas propias, carreras y seguridad. La skill es el director de obra; ellos ponen los ladrillos."
+          "notes": "Trabajan los workers: el revisor de bugs de Cursor y dos pasadas propias, carreras y seguridad. La skill dirige la obra; los workers la construyen."
         },
         {
           "type": "term",
@@ -410,7 +482,7 @@
         },
         {
           "type": "say",
-          "md": "#### Listo\n- Corrida y reportes en `~/auditorias/mi-servicio`: `mi-servicio-correctness.html` y `mi-servicio-quality.html`.\n- Correctitud: **se muestra 1 de 2**. C-02 (la carrera en el contador) quedó sin verificar y afuera.\n- Calidad: **se muestra 1 de 1**.\n- Una rama local, `fix/c-01-descuento-sin-tope`, sin push.\n- Pasadas propias en vez de obreros externos: estático (sin semgrep, gitleaks ni osv-scanner), calidad (sin wshobson/agents) y contraste (sin el CLI `agent`).\n- Contraste: **Sonnet 5.5 High** revisó lo que escribí yo (**GPT-5.6 Terra**), un modelo de **otra familia**, y el reporte dice quién contrastó a quién.\n- Pendiente: los tests nuevos (paso 1.5), como pediste; sin superpowers, con la pasada propia.",
+          "md": "#### Listo\n- Corrida y reportes en `~/auditorias/mi-servicio`: `mi-servicio-correctness.html` y `mi-servicio-quality.html`.\n- Correctitud: **se muestra 1 de 2**. C-02 (la carrera en el contador) quedó sin verificar y afuera.\n- Calidad: **se muestra 1 de 1**.\n- Una rama local, `fix/c-01-descuento-sin-tope`, sin push.\n- Pasadas propias en vez de workers externos: estático (sin semgrep, gitleaks ni osv-scanner), calidad (sin wshobson/agents) y contraste (sin el CLI `agent`).\n- Contraste: **Sonnet 5.5 High** revisó lo que escribí yo (**GPT-5.6 Terra**), un modelo de **otra familia**, y el reporte dice quién contrastó a quién.\n- Pendiente: los tests nuevos (paso 1.5), como pediste; sin superpowers, con la pasada propia.",
           "source": "inferido",
           "notes": "Leé el cierre: dónde están los reportes, cuánto se muestra de cuánto, qué rama quedó (local), qué pasos usaron la pasada propia, quién contrastó a quién y qué falta. Nada se publicó.",
           "pause": true
@@ -609,7 +681,7 @@
       "faq": [
         {
           "q": "¿Me vuelve a preguntar lo del principio?",
-          "a": "No. Las opciones (publish, los obreros que no quisiste) quedan en la corrida y se leen de ahí."
+          "a": "No. Las opciones (publish, los workers que no quisiste) quedan en la corrida y se leen de ahí."
         },
         {
           "q": "¿Y si la corrida la escribió una versión más nueva de la skill?",
@@ -810,6 +882,13 @@
         }
       ],
       "steps": [
+        {
+          "type": "page",
+          "title": "inherited-audit · 8 de 8",
+          "src": "pages/ia-slide-08.html",
+          "source": "inferido",
+          "notes": "Cerrá con los límites, dichos por la propia skill: protege de publicar sin querer y de citas inventadas; no decide qué le importa a tu equipo."
+        },
         {
           "type": "ask",
           "text": "¿Qué me llevo de esto?",
