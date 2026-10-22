@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 
 OUT = Path(__file__).resolve().parent.parent / "episodes" / "pages"
-DECK = "inherited-audit · Qué resuelve y cómo"
+DECK = "inherited-audit · Cómo funciona"
 
 KIND = {  # actor kind -> (stroke, fill, text)
     "person": ("#6e6e73", "#f2f2f4", "#1d1d1f"),
