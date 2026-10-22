@@ -117,6 +117,9 @@ def _exec(cmd: List[str], cwd: Path, env: Dict[str, str], deadline: float) -> Tu
         except subprocess.TimeoutExpired:
             code, expired = None, True
             _kill_group(proc)
+        except BaseException:  # ia itself was stopped: the suite lives in its own session, so stop it too
+            _kill_group(proc)
+            raise
         sink.seek(0)
         return code, sink.read(), expired
 

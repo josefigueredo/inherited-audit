@@ -5,6 +5,7 @@ Exit codes: 0 ok, 1 the command found problems, 2 usage error, 3 an external too
 from __future__ import annotations
 
 import argparse
+import signal
 import sys
 from pathlib import Path
 from typing import Callable, List, Optional
@@ -472,10 +473,30 @@ def parser() -> argparse.ArgumentParser:
     return p
 
 
+STOP_SIGNALS = (signal.SIGTERM, signal.SIGHUP)
+
+
+def _on_stop(signum: int, _frame: object) -> None:
+    for s in STOP_SIGNALS:  # a second signal must not cut the cleanup the first one started
+        signal.signal(s, signal.SIG_IGN)
+    raise runmod.Interrupted(signum)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     p = parser()
     args = p.parse_args(argv)
     if not getattr(args, "cmd", None):
         p.print_usage(sys.stderr)
         return USAGE
-    return args.func(args)
+    previous = {s: signal.signal(s, _on_stop) for s in STOP_SIGNALS}
+    try:
+        return args.func(args)
+    except runmod.Interrupted as exc:
+        print(f"error: {exc}; running commands were stopped and temporary worktrees removed", file=sys.stderr)
+        return 128 + exc.signum
+    except KeyboardInterrupt:
+        print("error: interrupted; running commands were stopped and temporary worktrees removed", file=sys.stderr)
+        return 128 + signal.SIGINT
+    finally:
+        for s, handler in previous.items():
+            signal.signal(s, handler)

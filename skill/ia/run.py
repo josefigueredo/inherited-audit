@@ -34,6 +34,14 @@ class ToolError(RunError):
     """An external tool failed or is missing (exit 3)."""
 
 
+class Interrupted(BaseException):
+    """The host stopped ia (SIGTERM, SIGHUP); a BaseException so cleanup in `finally` runs and nothing swallows it."""
+
+    def __init__(self, signum: int) -> None:
+        super().__init__(f"interrupted by signal {signum}")
+        self.signum = signum
+
+
 LOCK_NAME = ".ia.lock"
 _HELD: Dict[str, int] = {}
 

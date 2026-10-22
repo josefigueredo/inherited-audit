@@ -194,7 +194,11 @@ python3 <skill-dir>/ia.py step --run <run-dir> correctness in_progress
      example `test_cmd='["make","test"]'`, `env='{"DATABASE_URL":"..."}'`, `deps=install` once agreed).
      Baseline commands run with `CI=1` and `npm_config_yes=false`, so `npx` never downloads a package on its own.
   4. `python3 <skill-dir>/ia.py baseline --run <run-dir>` (optionally `--alias` and `--timeout`): runs each suite at
-     the pinned SHA in a throwaway worktree and saves the raw output.
+     the pinned SHA in a throwaway worktree and saves the raw output. Its default `--timeout` (1800 s per repo) is
+     longer than a host's foreground command limit (10 minutes in Claude Code): run it in the background (Claude
+     Code's `run_in_background`, a separate Cursor terminal) or pass a `--timeout` below that limit. If the host
+     stops it anyway, `ia` stops the suite, removes the worktree and exits 143 (SIGTERM) or 129 (SIGHUP); run it
+     again.
   5. `detect` also records `manifest.modules`: the modules of each repo (the folders under `src/modules`,
      `src/features`, `src/app`, `app`, `src/components`, and every other folder of `src/`). Steps 1 and 2 are
      closed against them (see "Coverage map" below); if the inventory shows modules `detect` missed, fix that before

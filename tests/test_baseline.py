@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 import os
 import signal
+import subprocess
 import sys
 import time
 import unittest
 from pathlib import Path
 
-from helpers import git, make_dir, make_git_repo, run_cli, write_tree
+from helpers import SKILL, git, make_dir, make_git_repo, run_cli, write_tree
 
 from ia import baseline as bl
 from ia import run as runmod
@@ -334,6 +335,44 @@ class BaselineCliTest(unittest.TestCase):
         manifest = runmod.load(run)
         self.assertTrue(manifest["baseline"]["BACK"]["result"]["timed_out"])
         self.assertNotEqual(manifest["steps"]["baseline"], "done")
+
+    def _killed_mid_suite(self, signum: int):
+        """Starts `ia baseline` on a long suite, sends `signum` to ia once the suite runs; (returncode, suite pid, repo)."""
+        pidfile = make_dir() / "pid"
+        self.addCleanup(_kill_pidfile, pidfile)
+        code = f"import os, time\nopen({str(pidfile)!r}, 'w').write(str(os.getpid()))\ntime.sleep(60)\n"
+        run, repo, _ = make_run(test_cmd=[sys.executable, "-c", code])
+        proc = subprocess.Popen([sys.executable, str(SKILL / "ia.py"), "baseline", "--run", str(run), "--timeout", "120"],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        deadline = time.monotonic() + 30
+        while not (pidfile.exists() and pidfile.read_text()) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertTrue(pidfile.exists(), "the suite never started")
+        proc.send_signal(signum)
+        proc.communicate(timeout=30)
+        return proc.returncode, int(pidfile.read_text()), repo
+
+    def _assert_cleaned(self, suite_pid: int, repo) -> None:
+        deadline = time.monotonic() + 5
+        alive = True
+        while alive and time.monotonic() < deadline:
+            try:
+                os.kill(suite_pid, 0)
+                time.sleep(0.05)
+            except ProcessLookupError:
+                alive = False
+        self.assertFalse(alive, "the suite outlived ia")
+        self.assertEqual(len(git(repo, "worktree", "list").splitlines()), 1)
+
+    def test_sigterm_kills_the_suite_and_removes_the_worktree(self):
+        code, pid, repo = self._killed_mid_suite(signal.SIGTERM)
+        self.assertEqual(code, 128 + signal.SIGTERM)
+        self._assert_cleaned(pid, repo)
+
+    def test_sighup_kills_the_suite_and_removes_the_worktree(self):
+        code, pid, repo = self._killed_mid_suite(signal.SIGHUP)
+        self.assertEqual(code, 128 + signal.SIGHUP)
+        self._assert_cleaned(pid, repo)
 
     def test_set_manual_result_closes_step_with_source_manual(self):
         run, _, _ = make_run(test_cmd=[sys.executable, "-c", "print('???')"])
