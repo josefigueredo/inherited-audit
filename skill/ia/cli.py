@@ -1,12 +1,15 @@
 """ia: pin the base of an inherited-system audit, track a resumable run, check citations, branches and hygiene, render reports.
 
-Exit codes: 0 ok, 1 the command found problems, 2 usage error, 3 an external tool failed or is missing.
+Exit codes: 0 ok, 1 the command found problems, 2 usage error, 3 an external tool failed or is missing, 4 ia itself
+failed, 128+N stopped by signal N after cleaning up.
 """
 from __future__ import annotations
 
 import argparse
+import os
 import signal
 import sys
+import traceback
 from pathlib import Path
 from typing import Callable, List, Optional
 
@@ -25,7 +28,7 @@ from . import publish as publishmod
 from . import render as rendermod
 from . import run as runmod
 
-OK, FINDINGS, USAGE, FAILED = 0, 1, 2, 3
+OK, FINDINGS, USAGE, FAILED, INTERNAL = 0, 1, 2, 3, 4
 
 COMMANDS = (
     ("init", "create a run directory and pin the base SHA of each audited repo"),
@@ -54,7 +57,11 @@ def _not_implemented(name: str) -> Callable[[argparse.Namespace], int]:
 
 
 def _guard(fn: Callable[[argparse.Namespace], int]) -> Callable[[argparse.Namespace], int]:
-    """Maps run errors to exit codes: 1 problems, 2 usage, 3 external tool."""
+    """Maps run errors to exit codes: 1 problems, 2 usage, 3 external tool, 4 anything else (ia itself failed).
+
+    An agent acts on the code alone, so an unexpected error must never look like 1 ("fix the problems printed").
+    IA_DEBUG=1 adds the traceback.
+    """
     def handler(args: argparse.Namespace) -> int:
         try:
             return fn(args)
@@ -67,6 +74,13 @@ def _guard(fn: Callable[[argparse.Namespace], int]) -> Callable[[argparse.Namesp
         except runmod.RunError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return FINDINGS
+        except Exception as exc:  # noqa: BLE001 - the last resort that keeps the exit-code contract
+            if os.environ.get("IA_DEBUG"):
+                traceback.print_exc()
+            message = " ".join(str(exc).split())
+            print(f"error: ia failed: {type(exc).__name__}: {message} (rerun with IA_DEBUG=1 for the traceback)",
+                  file=sys.stderr)
+            return INTERNAL
     return handler
 
 
@@ -103,7 +117,10 @@ def _finding(args: argparse.Namespace) -> int:
     run_dir = Path(args.run)
     try:
         if args.action == "add":
-            raw = sys.stdin.read() if args.file == "-" else Path(args.file).read_text(encoding="utf-8")
+            try:
+                raw = sys.stdin.read() if args.file == "-" else Path(args.file).read_text(encoding="utf-8")
+            except OSError as exc:
+                raise runmod.UsageError(f"cannot read {args.file}: {exc}")
             try:
                 data = json.loads(raw)
             except ValueError as exc:
@@ -120,8 +137,6 @@ def _finding(args: argparse.Namespace) -> int:
         for problem in exc.problems:
             print(f"error: {problem}", file=sys.stderr)
         return FINDINGS
-    except OSError as exc:
-        raise runmod.UsageError(str(exc))
     return OK
 
 

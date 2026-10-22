@@ -267,6 +267,21 @@ class ManifestTest(unittest.TestCase):
             run.load(run_dir)
         self.assertIn("newer", str(ctx.exception))
 
+    def test_manifest_with_a_broken_shape_is_a_problem_not_a_crash(self):
+        cases = [("steps", None), ("repos", None), ("steps", []), ("repos", [{"alias": "BACK"}]), ("system", 3)]
+        for key, value in cases:
+            run_dir = self.make_run()
+            manifest = run.load(run_dir)
+            if value is None:
+                del manifest[key]
+            else:
+                manifest[key] = value
+            run.save(run_dir, manifest)
+            result = run_cli(["status", "--run", str(run_dir)])
+            self.assertEqual(result.returncode, 1, (key, result.stderr))
+            self.assertIn(key, result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+
     def test_next_step_skips_done_and_skipped(self):
         manifest = {"steps": {s: "pending" for s in run.STEPS}}
         self.assertEqual(run.next_step(manifest), "baseline")

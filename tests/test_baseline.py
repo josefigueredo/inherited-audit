@@ -218,6 +218,26 @@ class RunBaselineTest(unittest.TestCase):
         bl.run_baseline(run, "BACK", 60)
         self.assertFalse(marker.exists(), "the core.hooksPath hook ran")
 
+    def _not_executable(self) -> str:
+        path = make_dir() / "notexec"
+        path.write_bytes(b"\x00\x01garbage")
+        path.chmod(0o755)
+        return str(path)
+
+    def test_exec_format_error_recorded_not_raised(self):
+        run, repo, _ = make_run(test_cmd=[self._not_executable()])
+        result = bl.run_baseline(run, "BACK", 60)
+        self.assertFalse(result["measured"])
+        self.assertIn("could not start", result["error"])
+        self.assertEqual(runmod.load(run)["baseline"]["BACK"]["result"]["error"], result["error"])
+        self.assertEqual(len(git(repo, "worktree", "list").splitlines()), 1)
+
+    def test_coverage_exec_format_error_is_a_coverage_error(self):
+        run, _, _ = make_run(coverage_cmd=[self._not_executable()])
+        result = bl.run_baseline(run, "BACK", 60)
+        self.assertEqual(result["passed"], 1)
+        self.assertIn("could not start", result["coverage_error"])
+
     def test_missing_command_recorded_not_raised(self):
         run, _, _ = make_run(test_cmd=["definitely-not-a-binary-xyz"])
         result = bl.run_baseline(run, "BACK", 60)

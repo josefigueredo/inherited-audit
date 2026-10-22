@@ -262,6 +262,9 @@ def load(run: Path) -> dict:
     if version > SUPPORTED_VERSION:
         raise RunError(f"{path} is version {version}, newer than the {SUPPORTED_VERSION} this ia supports; "
                        "update ia instead of resuming it")
+    problems = _shape_problems(manifest)
+    if problems:
+        raise RunError(f"{path} is damaged ({'; '.join(problems)}); restore it from a backup or start a new run")
     options = manifest.get("options")
     if isinstance(options, dict) and options.get("fix") is True:
         options["fix"] = False
@@ -270,6 +273,25 @@ def load(run: Path) -> dict:
             print(f"warning: {path} has options.fix=true; fixes are no longer applied, the run stops at the red "
                   "test and the written proposal (treated as false)", file=sys.stderr)
     return manifest
+
+
+def _shape_problems(manifest: dict) -> List[str]:
+    """The fields every command indexes directly; a hand edit that breaks one is reported, not a KeyError later."""
+    problems = [f"{key} must be a non-empty string" for key in ("system", "created", "lang", "host")
+                if not isinstance(manifest.get(key), str) or not manifest[key]]
+    problems += [f"{key} must be an object" for key in ("steps", "baseline") if not isinstance(manifest.get(key), dict)]
+    if "options" in manifest and not isinstance(manifest["options"], dict):
+        problems.append("options must be an object")
+    repos = manifest.get("repos")
+    if not isinstance(repos, list) or not repos:
+        problems.append("repos must be a non-empty list")
+    else:
+        for i, repo in enumerate(repos):
+            fields = ("alias", "path", "sha")
+            if not isinstance(repo, dict) or not all(isinstance(repo.get(k), str) and repo[k] for k in fields) \
+                    or not isinstance(repo.get("subdir", ""), str):
+                problems.append(f"repos[{i}] needs string alias, path and sha")
+    return problems
 
 
 def save(run: Path, manifest: dict) -> None:

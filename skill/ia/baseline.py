@@ -176,7 +176,7 @@ def _run_coverage(cmd: List[str], cwd: Path, env: Dict[str, str], deadline: floa
     label = " ".join(cmd)
     try:
         code, out, expired = _exec(cmd, cwd, env, deadline)
-    except (FileNotFoundError, NotADirectoryError, PermissionError) as exc:
+    except OSError as exc:  # missing, not executable, wrong format: the command never ran
         error = f"could not start `{label}`: {exc}"
         chunks.add(label, (error + "\n").encode("utf-8"))
         return None, error
@@ -230,7 +230,7 @@ def run_baseline(run: Path, alias: str, timeout: int) -> dict:
         for kind, cmd in steps:
             try:
                 code, out, expired = _exec(cmd, cwd, env, deadline)
-            except (FileNotFoundError, NotADirectoryError, PermissionError) as exc:
+            except OSError as exc:  # missing, not executable, wrong format: the command never ran
                 error = f"could not start `{' '.join(cmd)}`: {exc}"
                 chunks.add(" ".join(cmd), (error + "\n").encode("utf-8"))
                 break

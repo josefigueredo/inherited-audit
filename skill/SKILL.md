@@ -67,8 +67,11 @@ decides what to run.
 python3 <skill-dir>/ia.py status --run <run-dir>
 ```
 
-Every command of the run takes `--run <run-dir>`; `init` creates it. Exit codes: 0 ok, 1 the command found problems, 2 usage error, 3 an external tool failed or is missing.
-On 1, read the problems it printed and fix them; on 2, read the usage; on 3, tell the person which tool failed.
+Every command of the run takes `--run <run-dir>`; `init` creates it. Exit codes: 0 ok, 1 the command found problems, 2 usage error, 3 an external tool failed or is missing, 4 ia itself failed.
+On 1, read the problems it printed and fix them; on 2, read the usage; on 3, tell the person which tool failed; on 4,
+do not work around it: show the person the one-line error (rerun with `IA_DEBUG=1` for the traceback). 128+N means a
+signal N stopped `ia` (143 SIGTERM, 129 SIGHUP, 130 Ctrl-C) after it cleaned up; run the command again.
+Parallel calls on one run are safe: every write takes a lock on the run dir (`.ia.lock`).
 
 ## Always start here
 
