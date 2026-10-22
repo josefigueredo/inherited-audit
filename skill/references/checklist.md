@@ -33,8 +33,8 @@ The step names in backticks are the keys of `manifest.json` `steps`, in order.
 
 ## Coverage map (`correctness`, `quality`)
 
-- `ia.py detect` records `manifest.modules`; `ia.py coverage add` records one cell per module and pass, `found` or
-  `nothing`; `ia.py coverage status` shows the grid and what is open.
+- `ia.py detect` records `manifest.modules`; `ia.py coverage add` records one cell per module and pass, `found`,
+  `nothing` or `n/a` (does not apply, with a `--note` saying why; listed apart in the report); `ia.py coverage status` shows the grid and what is open.
 - Required: `correctness` needs `correctness-general`, `races-distributed` and `security` for every module; `quality`
   needs `quality-lenses`. Modules of the `ROOT` alias (config, CI, containers) need only `security` and
   `quality-lenses`; `coverage status` prints `-` for the cells they do not need. Files sitting directly in `src/` (or in

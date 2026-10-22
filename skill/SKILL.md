@@ -247,9 +247,12 @@ python3 <skill-dir>/ia.py coverage add --run <run-dir> --pass races-distributed 
 python3 <skill-dir>/ia.py coverage status --run <run-dir>
 ```
 
-  `--result` is `found` or `nothing`; `--module` can repeat. A `races-distributed` cell is complete only with
+  `--result` is `found`, `nothing` or `n/a`; `--module` can repeat. A `races-distributed` cell is complete only with
   `--topics` listing every topic of the pass (1 to 10), also when the result is `nothing`: a topic you did not check is
-  not covered. Last write wins. `coverage status` prints the grid and the open cells (add `--pass` to see one pass).
+  not covered. `n/a` says the pass does not apply to the module (a races pass on presentational UI code with no I/O
+  and no shared state, a security pass on generated code): it needs `--note` with the reason, takes no `--topics`,
+  and the report lists it apart from `nothing`, which means "looked and found nothing". Never use it to skip work
+  that applies. Last write wins. `coverage status` prints the grid and the open cells (add `--pass` to see one pass).
 - Closes: `ia.py step --run <run-dir> correctness done`, which refuses and lists the open cells. If the person
   decides a module stays out, `ia.py step --run <run-dir> correctness done --force-open "<reason>"` closes anyway,
   records the reason and the open cells in `manifest.coverage_waivers`, and the report shows it in "How it was done".
@@ -303,7 +306,7 @@ python3 <skill-dir>/ia.py finding set --run <run-dir> C-07 verdict=confirmed con
 - Each finding: `report` `quality`, a `suggestion`, an `effort`, and `measurement` when it is quantitative. The
   resilience and lying-documentation dimensions belong here.
 - Record each module the lenses visited with `ia.py coverage add --run <run-dir> --pass quality-lenses --module
-  ALIAS/path --result found|nothing`.
+  ALIAS/path --result found|nothing|n/a` (`n/a` with `--note`).
 - Closes: `ia.py step --run <run-dir> quality done`, which refuses while a module has no `quality-lenses` cell;
   `--force-open "<reason>"` works as in step 1.
 

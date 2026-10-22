@@ -178,7 +178,9 @@ python3 <skill-dir>/ia.py coverage add --run <run-dir> --pass races-distributed 
   --result nothing --topics 1,2,3,4,5,6,7,8,9,10 --note "all ten topics walked, nothing found"
 ```
 
-`--result found|nothing` says whether the module produced findings. `--topics` lists only the topics you really
+`--result found|nothing` says whether the module produced findings. When the module has nothing this pass looks at
+(presentational components with no I/O, no shared state and no background work), record `--result n/a --note
+"<why>"` instead, with no topics; a module with any I/O, store, timer or worker is not `n/a`. `--topics` lists only the topics you really
 walked on that module: leave a topic out rather than claim it, and the cell stays open until someone walks it.
 A later `coverage add` for the same pass and module replaces the whole cell, so list every topic walked so far,
 not only the new ones.

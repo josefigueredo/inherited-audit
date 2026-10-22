@@ -305,6 +305,47 @@ class StepGuardTest(unittest.TestCase):
         self.assertEqual(res.stderr, "")
 
 
+class NotApplicableTest(unittest.TestCase):
+    def test_not_applicable_needs_a_note(self):
+        out = new_run()
+        res = add(out, "races-distributed", "BACK/src/lib", "n/a")
+        self.assertEqual(res.returncode, 2)
+        self.assertIn("--note", res.stderr)
+
+    def test_not_applicable_closes_a_races_cell_without_topics(self):
+        out = new_run()
+        fill_correctness(out, MODS)
+        res = add(out, "races-distributed", "BACK/src/lib", "n/a", note="pure UI helpers: no I/O, no shared state")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        res = run_cli(["step", "--run", str(out), "correctness", "done"])
+        self.assertEqual(res.returncode, 0, res.stderr)
+        cell = runmod.load(out)["coverage"]["races-distributed"]["BACK/src/lib"]
+        self.assertEqual(cell, {"result": "n/a", "note": "pure UI helpers: no I/O, no shared state"})
+
+    def test_not_applicable_refuses_topics(self):
+        out = new_run()
+        res = add(out, "races-distributed", "BACK/src/lib", "n/a", topics="1,2", note="x")
+        self.assertEqual(res.returncode, 2)
+
+    def test_status_shows_not_applicable(self):
+        out = new_run()
+        add(out, "security", "BACK/src/lib", "n/a", note="generated code")
+        res = run_cli(["coverage", "status", "--run", str(out), "--pass", "security"])
+        self.assertIn("n/a", res.stdout.splitlines()[2])
+
+    def test_render_lists_not_applicable_cells_with_their_note(self):
+        repo = {"alias": "BACK", "path": "/r", "sha": "a" * 40, "remote": "", "subdir": ""}
+        manifest = {"repos": [repo], "filter": {}, "modules": {"BACK": ["src/lib"]},
+                    "coverage": {"races-distributed": {"BACK/src/lib": {"result": "n/a", "note": "no shared state"}},
+                                 "security": {"BACK/src/lib": {"result": "nothing"}}}}
+        html = rendermod._how(manifest, "correctness", [], rendermod.LABELS["es"])
+        self.assertIn(rendermod.LABELS["es"]["how_not_applicable"], html)
+        self.assertIn("BACK/src/lib", html)
+        self.assertIn("no shared state", html)
+        quality = rendermod._how(manifest, "quality", [], rendermod.LABELS["en"])
+        self.assertNotIn("no shared state", quality)
+
+
 class RenderWaiverTest(unittest.TestCase):
     def test_waivers_are_shown_in_how_it_was_done(self):
         manifest = {"repos": [], "filter": {}, "coverage_waivers": [
@@ -325,8 +366,12 @@ class DocsTest(unittest.TestCase):
 
     def test_skill_md_teaches_the_coverage_map(self):
         text = self.read("SKILL.md")
-        for needle in ("ia.py coverage add", "ia.py coverage status", "--force-open", "--topics"):
+        for needle in ("ia.py coverage add", "ia.py coverage status", "--force-open", "--topics", "`n/a`"):
             self.assertIn(needle, text)
+
+    def test_not_applicable_is_documented_wherever_results_are(self):
+        for rel in ("references/checklist.md", "references/schema.md", "references/passes/races-distributed.md"):
+            self.assertIn("n/a", self.read(rel), rel)
 
     def test_checklist_and_schema_describe_it(self):
         self.assertIn("coverage", self.read("references/checklist.md"))
