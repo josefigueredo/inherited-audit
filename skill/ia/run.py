@@ -1,14 +1,25 @@
 """The run manifest: the resumable state every ia command reads."""
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
 import sys
 import subprocess
+import tempfile
 from datetime import date
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
+
+try:
+    import fcntl
+except ImportError:  # Windows: msvcrt byte-range locks instead (only `baseline` is POSIX-only)
+    fcntl = None  # type: ignore[assignment]
+try:
+    import msvcrt
+except ImportError:
+    msvcrt = None  # type: ignore[assignment]
 
 STEPS: Tuple[str, ...] = ("baseline", "correctness", "proof", "tests", "quality", "contrast", "verify", "filter",
                           "prose", "hygiene", "render")
@@ -31,9 +42,97 @@ class ToolError(RunError):
     """An external tool failed or is missing (exit 3)."""
 
 
+class Interrupted(BaseException):
+    """The host stopped ia (SIGTERM, SIGHUP); a BaseException so cleanup in `finally` runs and nothing swallows it."""
+
+    def __init__(self, signum: int) -> None:
+        super().__init__(f"interrupted by signal {signum}")
+        self.signum = signum
+
+
+LOCK_NAME = ".ia.lock"
+_HELD: Dict[str, int] = {}
+
+
+@contextlib.contextmanager
+def run_lock(run: Path) -> Iterator[None]:
+    """Exclusive lock on the run dir for a read-modify-write: parallel subagents call ia on the same run.
+
+    Reentrant inside one process (flock on a second descriptor of the same file would block on itself).
+    """
+    key = str(Path(run).resolve())
+    if _HELD.get(key):
+        _HELD[key] += 1
+        try:
+            yield
+        finally:
+            _HELD[key] -= 1
+        return
+    if not (Path(key) / "manifest.json").is_file():  # never leave a lock file in a dir that is not a run
+        raise RunError(f"no manifest.json in {run}")
+    path = Path(key) / LOCK_NAME
+    try:
+        fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError as exc:
+        raise RunError(f"cannot lock the run dir {key}: {exc}")
+    try:
+        _lock_fd(fd)
+        _HELD[key] = 1
+        try:
+            yield
+        finally:
+            _HELD.pop(key, None)
+            _unlock_fd(fd)
+    finally:
+        os.close(fd)
+
+
+def _lock_fd(fd: int) -> None:
+    if fcntl is not None:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+    elif msvcrt is not None:
+        while True:  # LK_LOCK gives up after ~10 s; a long writer is no reason to fail
+            os.lseek(fd, 0, os.SEEK_SET)
+            try:
+                msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+                return
+            except OSError:
+                continue
+    else:
+        raise ToolError("no file locking on this platform (neither fcntl nor msvcrt)")
+
+
+def _unlock_fd(fd: int) -> None:
+    if fcntl is not None:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    elif msvcrt is not None:
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+
+
+def atomic_write(path: Path, text: str) -> None:
+    """Writes through a tmp file unique to this writer, then renames it over `path`."""
+    path = Path(path)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, str(path))
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
+# The audited repo is untrusted: `worktree add` would run its post-checkout hook (.git/hooks, husky's core.hooksPath)
+# outside every timeout. ia never needs a hook, and never reads stdin.
+NO_HOOKS = ("-c", "core.hooksPath=/dev/null")
+
+
 def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
     try:
-        result = subprocess.run(["git", *args], cwd=str(repo), capture_output=True, text=True)
+        result = subprocess.run(["git", *NO_HOOKS, *args], cwd=str(repo), capture_output=True, text=True,
+                                stdin=subprocess.DEVNULL)
     except (OSError, ValueError) as exc:
         raise ToolError(f"git is not available: {exc}")
     if check and result.returncode != 0:
@@ -175,7 +274,7 @@ def init_run(system: str, repos: List[Tuple[str, Path, str]], out: Optional[Path
                 "options": {"fix": False, "publish": publish}, "repos": entries,
                 "steps": {s: "pending" for s in STEPS}, "tools": {}, "workers": {}, "baseline": {},
                 "sections": {"correctness": [], "quality": []}}
-    save(run_dir, manifest)
+    _write_manifest(run_dir, manifest)  # a new run: nothing to lock against yet
     return run_dir
 
 
@@ -196,6 +295,9 @@ def load(run: Path) -> dict:
     if version > SUPPORTED_VERSION:
         raise RunError(f"{path} is version {version}, newer than the {SUPPORTED_VERSION} this ia supports; "
                        "update ia instead of resuming it")
+    problems = _shape_problems(manifest)
+    if problems:
+        raise RunError(f"{path} is damaged ({'; '.join(problems)}); restore it from a backup or start a new run")
     options = manifest.get("options")
     if isinstance(options, dict) and options.get("fix") is True:
         options["fix"] = False
@@ -206,11 +308,43 @@ def load(run: Path) -> dict:
     return manifest
 
 
+def _shape_problems(manifest: dict) -> List[str]:
+    """The fields every command indexes directly; a hand edit that breaks one is reported, not a KeyError later."""
+    problems = [f"{key} must be a non-empty string" for key in ("system", "created", "lang", "host")
+                if not isinstance(manifest.get(key), str) or not manifest[key]]
+    problems += [f"{key} must be an object" for key in ("steps", "baseline") if not isinstance(manifest.get(key), dict)]
+    if "options" in manifest and not isinstance(manifest["options"], dict):
+        problems.append("options must be an object")
+    repos = manifest.get("repos")
+    if not isinstance(repos, list) or not repos:
+        problems.append("repos must be a non-empty list")
+    else:
+        for i, repo in enumerate(repos):
+            fields = ("alias", "path", "sha")
+            if not isinstance(repo, dict) or not all(isinstance(repo.get(k), str) and repo[k] for k in fields) \
+                    or not isinstance(repo.get("subdir", ""), str):
+                problems.append(f"repos[{i}] needs string alias, path and sha")
+    return problems
+
+
+def _write_manifest(run: Path, manifest: dict) -> None:
+    atomic_write(Path(run) / "manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+
+
 def save(run: Path, manifest: dict) -> None:
-    run = Path(run)
-    tmp = run / "manifest.json.tmp"
-    tmp.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    os.replace(tmp, run / "manifest.json")
+    with run_lock(run):
+        _write_manifest(run, manifest)
+
+
+@contextlib.contextmanager
+def transaction(run: Path) -> Iterator[dict]:
+    """load -> change -> save under the run lock, so a parallel ia call cannot overwrite the change.
+
+    Nothing is saved when the block raises."""
+    with run_lock(run):
+        manifest = load(run)
+        yield manifest
+        save(run, manifest)
 
 
 def set_step(run: Path, step: str, state: str, force_open: Optional[str] = None) -> None:
@@ -220,12 +354,11 @@ def set_step(run: Path, step: str, state: str, force_open: Optional[str] = None)
         raise UsageError(f"unknown state {state!r}; expected one of {', '.join(STATES)}")
     if force_open is not None and not force_open.strip():
         raise UsageError("--force-open needs a reason")
-    manifest = load(run)
-    if state == "done":
-        from . import coverage  # local: coverage imports this module
-        coverage.guard_step(manifest, step, force_open.strip() if force_open is not None else None)
-    manifest["steps"][step] = state
-    save(run, manifest)
+    with transaction(run) as manifest:
+        if state == "done":
+            from . import coverage  # local: coverage imports this module
+            coverage.guard_step(manifest, step, force_open.strip() if force_open is not None else None)
+        manifest["steps"][step] = state
 
 
 def next_step(manifest: dict) -> Optional[str]:
@@ -403,7 +536,11 @@ def parse_set_pairs(manifest: dict, pairs: List[str]) -> List[Tuple[str, object]
 
 def set_keys(run: Path, pairs: List[str]) -> List[str]:
     """Sets manifest-level keys in one atomic save; returns the keys set."""
-    manifest = load(run)
+    with transaction(run) as manifest:
+        return _set_keys(manifest, pairs)
+
+
+def _set_keys(manifest: dict, pairs: List[str]) -> List[str]:
     parsed = parse_set_pairs(manifest, pairs)
     for key, value in parsed:
         m = _TESTS_BRANCH.match(key)
@@ -428,5 +565,4 @@ def set_keys(run: Path, pairs: List[str]) -> List[str]:
             manifest[key] = value
     if any(_RESULT_KEY.match(k) for k, _ in parsed) and baselines_closed(manifest):
         manifest["steps"]["baseline"] = "done"
-    save(run, manifest)
     return [k for k, _ in parsed]

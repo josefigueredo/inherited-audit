@@ -310,6 +310,13 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run_cli(["finding", "add", "--run", str(run), str(path)]).returncode, 2)
         self.assertEqual(run_cli(["finding", "set", "--run", str(run), "C-01", "noequals"]).returncode, 2)
 
+    def test_set_refuses_an_id_that_is_not_a_finding_id(self):
+        run = make_run()
+        result = run_cli(["finding", "set", "--run", str(run), "../manifest", "system=x"])
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("is not a finding id", result.stderr)
+        self.assertEqual(runmod.load(run)["system"], "sys")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -267,6 +267,21 @@ class ManifestTest(unittest.TestCase):
             run.load(run_dir)
         self.assertIn("newer", str(ctx.exception))
 
+    def test_manifest_with_a_broken_shape_is_a_problem_not_a_crash(self):
+        cases = [("steps", None), ("repos", None), ("steps", []), ("repos", [{"alias": "BACK"}]), ("system", 3)]
+        for key, value in cases:
+            run_dir = self.make_run()
+            manifest = run.load(run_dir)
+            if value is None:
+                del manifest[key]
+            else:
+                manifest[key] = value
+            run.save(run_dir, manifest)
+            result = run_cli(["status", "--run", str(run_dir)])
+            self.assertEqual(result.returncode, 1, (key, result.stderr))
+            self.assertIn(key, result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+
     def test_next_step_skips_done_and_skipped(self):
         manifest = {"steps": {s: "pending" for s in run.STEPS}}
         self.assertEqual(run.next_step(manifest), "baseline")
@@ -281,7 +296,7 @@ class ManifestTest(unittest.TestCase):
         run_dir = self.make_run()
         run.set_step(run_dir, "baseline", "in_progress")
         self.assertEqual(run.load(run_dir)["steps"]["baseline"], "in_progress")
-        self.assertEqual(sorted(p.name for p in run_dir.iterdir()), ["findings", "manifest.json", "outputs"])
+        self.assertEqual(sorted(p.name for p in run_dir.iterdir() if p.name != run.LOCK_NAME), ["findings", "manifest.json", "outputs"])
 
     def test_set_step_rejects_unknown_step_or_state(self):
         run_dir = self.make_run()
@@ -364,7 +379,7 @@ class SetKeysTest(unittest.TestCase):
         self.assertEqual(m["strengths"], ["Clear module boundaries BACK/src/app.py:1"])
         self.assertEqual(m["baseline"]["BACK"]["tests_branch"], "tests/back-coverage")
         self.assertFalse(m["options"]["fix"])
-        self.assertEqual(sorted(p.name for p in self.run_dir.iterdir()), ["findings", "manifest.json", "outputs"])
+        self.assertEqual(sorted(p.name for p in self.run_dir.iterdir() if p.name != run.LOCK_NAME), ["findings", "manifest.json", "outputs"])
 
     def test_author_model_is_a_settable_string(self):
         r = self.cli("author_model=claude-opus-4")

@@ -102,20 +102,47 @@ class _Chunks:
         return b"".join(self.parts).decode("utf-8", errors="replace")
 
 
-def _exec(cmd: List[str], cwd: Path, env: Dict[str, str], deadline: float) -> Tuple[Optional[int], bytes, bool]:
-    """Runs one command in its own process group; returns (exit code, merged output, timed out)."""
-    proc = subprocess.Popen(cmd, cwd=str(cwd), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            stdin=subprocess.DEVNULL, start_new_session=True)
-    try:
-        out, _ = proc.communicate(timeout=max(deadline - time.monotonic(), 0.1))
-        return proc.returncode, out, False
-    except subprocess.TimeoutExpired:
+def _exec(cmd: List[str], cwd: Path, env: Dict[str, str], deadline: float,
+          groups: Optional[List[int]] = None) -> Tuple[Optional[int], bytes, bool]:
+    """Runs one command in its own process group; returns (exit code, merged output, timed out).
+
+    The output goes to a temp file, not a pipe: a grandchild that left the group (its own session, a daemon) can
+    keep a pipe open forever, and reading it to EOF would ignore both the command's exit and the deadline.
+    The group id goes into `groups`, so the caller can stop what the command left running in the background.
+    """
+    with tempfile.TemporaryFile() as sink:
+        proc = subprocess.Popen(cmd, cwd=str(cwd), env=env, stdout=sink, stderr=subprocess.STDOUT,
+                                stdin=subprocess.DEVNULL, start_new_session=True)
+        if groups is not None:
+            groups.append(proc.pid)
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
+            code: Optional[int] = proc.wait(timeout=max(deadline - time.monotonic(), 0.1))
+            expired = False
+        except subprocess.TimeoutExpired:
+            code, expired = None, True
+            _kill_group(proc)
+        except BaseException:  # ia itself was stopped: the suite lives in its own session, so stop it too
+            _kill_group(proc)
+            raise
+        sink.seek(0)
+        return code, sink.read(), expired
+
+
+def _kill_group(proc: subprocess.Popen) -> None:
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        proc.kill()
+    proc.wait()
+
+
+def _stop_groups(groups: List[int]) -> None:
+    """Stops whatever the repo's commands left running in their groups (a `pre` server, a `cmd &`)."""
+    for pgid in groups:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
-            proc.kill()
-        out, _ = proc.communicate()
-        return None, out or b"", True
+            pass
 
 
 def _worktree_cwd(repo_path: Path, subdir: str, wt: Path) -> Path:
@@ -141,9 +168,8 @@ def _link_deps(source_root: Path, target_root: Path, dirs: List[str], chunks: _C
 
 
 def _save_result(run: Path, alias: str, result: dict) -> None:
-    manifest = runmod.load(run)
-    manifest["baseline"].setdefault(alias, {})["result"] = result
-    runmod.save(run, manifest)
+    with runmod.transaction(run) as manifest:
+        manifest["baseline"].setdefault(alias, {})["result"] = result
 
 
 def _repo_and_plan(manifest: dict, alias: str) -> Tuple[dict, dict]:
@@ -158,12 +184,12 @@ def _repo_and_plan(manifest: dict, alias: str) -> Tuple[dict, dict]:
 
 
 def _run_coverage(cmd: List[str], cwd: Path, env: Dict[str, str], deadline: float, timeout: int,
-                  chunks: _Chunks) -> Tuple[Optional[float], str]:
+                  chunks: _Chunks, groups: Optional[List[int]] = None) -> Tuple[Optional[float], str]:
     """Runs the coverage command as a separate, non-fatal step: (coverage %, error or "")."""
     label = " ".join(cmd)
     try:
-        code, out, expired = _exec(cmd, cwd, env, deadline)
-    except (FileNotFoundError, NotADirectoryError, PermissionError) as exc:
+        code, out, expired = _exec(cmd, cwd, env, deadline, groups)
+    except OSError as exc:  # missing, not executable, wrong format: the command never ran
         error = f"could not start `{label}`: {exc}"
         chunks.add(label, (error + "\n").encode("utf-8"))
         return None, error
@@ -202,6 +228,7 @@ def run_baseline(run: Path, alias: str, timeout: int) -> dict:
     suite_text = ""
     coverage: Optional[float] = None
     coverage_error = ""
+    groups: List[int] = []
     try:
         runmod._git(repo_path, "worktree", "add", "--detach", str(wt), repo["sha"])
         added = True
@@ -216,8 +243,8 @@ def run_baseline(run: Path, alias: str, timeout: int) -> dict:
         steps.append(("suite", list(test_cmd)))
         for kind, cmd in steps:
             try:
-                code, out, expired = _exec(cmd, cwd, env, deadline)
-            except (FileNotFoundError, NotADirectoryError, PermissionError) as exc:
+                code, out, expired = _exec(cmd, cwd, env, deadline, groups)
+            except OSError as exc:  # missing, not executable, wrong format: the command never ran
                 error = f"could not start `{' '.join(cmd)}`: {exc}"
                 chunks.add(" ".join(cmd), (error + "\n").encode("utf-8"))
                 break
@@ -237,14 +264,16 @@ def run_baseline(run: Path, alias: str, timeout: int) -> dict:
         if ran_suite and cov_cmd:
             counts = parse_summary(suite_text)
             if counts["failed"] == 0 and counts["total"] is not None:
-                coverage, coverage_error = _run_coverage(cov_cmd, cwd, env, deadline, timeout, chunks)
+                coverage, coverage_error = _run_coverage(cov_cmd, cwd, env, deadline, timeout, chunks, groups)
             else:
                 coverage_error = "skipped: suite failing"
     finally:
+        _stop_groups(groups)  # after suite and coverage, so a `pre` server lives as long as they need it
         if added:
             subprocess.run(["git", "worktree", "remove", "--force", str(wt)], cwd=str(repo_path),
-                           capture_output=True)
-        subprocess.run(["git", "worktree", "prune"], cwd=str(repo_path), capture_output=True)
+                           capture_output=True, stdin=subprocess.DEVNULL)
+        subprocess.run(["git", "worktree", "prune"], cwd=str(repo_path), capture_output=True,
+                       stdin=subprocess.DEVNULL)
         shutil.rmtree(tmp, ignore_errors=True)
     text = chunks.text()
     out_rel = f"outputs/baseline-{alias}.txt"
@@ -310,10 +339,9 @@ def parse_pairs(alias_and_pairs: List[str]) -> Tuple[str, Dict[str, object]]:
 
 
 def set_plan(run: Path, alias: str, values: Dict[str, object]) -> dict:
-    manifest = runmod.load(Path(run))
-    _, plan = _repo_and_plan(manifest, alias)
-    plan.update(values)
-    edited = [k for k in plan.get("edited") or [] if isinstance(k, str)]
-    plan["edited"] = edited + [k for k in values if k not in edited]
-    runmod.save(Path(run), manifest)
+    with runmod.transaction(Path(run)) as manifest:
+        _, plan = _repo_and_plan(manifest, alias)
+        plan.update(values)
+        edited = [k for k in plan.get("edited") or [] if isinstance(k, str)]
+        plan["edited"] = edited + [k for k in values if k not in edited]
     return plan

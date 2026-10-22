@@ -21,7 +21,8 @@ def _git_show(root: Path, sha: str, rel: str) -> Optional[bytes]:
     subdir, so the lockfile path inside the repo is `subdir/rel` without the detector knowing the top level.
     """
     try:
-        res = subprocess.run(["git", "-C", str(root), "show", f"{sha}:./{rel}"], capture_output=True)
+        res = subprocess.run(["git", "-C", str(root), "show", f"{sha}:./{rel}"], capture_output=True,
+                             stdin=subprocess.DEVNULL)
     except (OSError, ValueError):
         return None
     return res.stdout if res.returncode == 0 else None

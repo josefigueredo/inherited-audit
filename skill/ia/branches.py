@@ -19,7 +19,8 @@ def git_supports_merge_tree(version_text: Optional[str] = None) -> bool:
     """True when git is >= 2.38 (`merge-tree --write-tree`). `version_text` is the `git --version` output, for tests."""
     if version_text is None:
         try:
-            version_text = subprocess.run(["git", "--version"], capture_output=True, text=True).stdout
+            version_text = subprocess.run(["git", "--version"], capture_output=True, text=True,
+                                          stdin=subprocess.DEVNULL).stdout
         except (OSError, ValueError) as exc:
             raise ToolError(f"git is not available: {exc}")
     m = re.search(r"(\d+)\.(\d+)", version_text)
@@ -28,7 +29,8 @@ def git_supports_merge_tree(version_text: Optional[str] = None) -> bool:
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
+        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL)
     except (OSError, ValueError) as exc:
         raise ToolError(f"git is not available: {exc}")
 

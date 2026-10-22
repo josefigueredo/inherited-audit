@@ -50,6 +50,11 @@ def start_here(findings: List[dict], n: int = 5) -> List[str]:
 
 def run_filter(run: Path, n: int = 5) -> dict:
     run = Path(run)
+    with runmod.run_lock(run):  # no finding may change between the counts and the `shown` writes
+        return _run_filter(run, n)
+
+
+def _run_filter(run: Path, n: int) -> dict:
     runmod.load(run)
     items = findingsmod.load_all(run)
     counts = apply(items)

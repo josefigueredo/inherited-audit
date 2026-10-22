@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
+import subprocess
 import sys
+import time
 import unittest
 from pathlib import Path
 
-from helpers import git, make_dir, make_git_repo, run_cli, write_tree
+from helpers import SKILL, git, make_dir, make_git_repo, run_cli, write_tree
 
 from ia import baseline as bl
 from ia import run as runmod
@@ -19,6 +23,13 @@ def plan(**over) -> dict:
             "env": {}, "pre": [], "deps": "none", "deps_dirs": [], "install_cmd": None}
     base.update(over)
     return base
+
+
+def _kill_pidfile(pidfile: Path) -> None:
+    try:
+        os.kill(int(pidfile.read_text()), signal.SIGKILL)
+    except (OSError, ValueError):
+        pass
 
 
 def make_run(files=None, subdir="", **plan_over):
@@ -159,6 +170,101 @@ class RunBaselineTest(unittest.TestCase):
         self.assertFalse(result["measured"])
         self.assertEqual(len(git(repo, "worktree", "list").splitlines()), 1)
 
+    def _detached(self, then: str) -> list:
+        """A suite that starts a grandchild in its own session (out of the suite's process group) holding stdout,
+        records its pid for cleanup, then runs `then`."""
+        pidfile = make_dir() / "pid"
+        self.addCleanup(_kill_pidfile, pidfile)
+        code = ("import subprocess, sys\n"
+                f"p = subprocess.Popen(['sleep', '30'], start_new_session=True)\n"
+                f"open({str(pidfile)!r}, 'w').write(str(p.pid))\n" + then)
+        return [sys.executable, "-c", code]
+
+    def test_suite_that_exits_is_not_held_by_a_detached_grandchild(self):
+        run, _, _ = make_run(test_cmd=self._detached("print('Ran 1 test in 0.0s'); print('OK')"))
+        started = time.monotonic()
+        result = bl.run_baseline(run, "BACK", 60)
+        self.assertLess(time.monotonic() - started, 10)
+        self.assertFalse(result["timed_out"])
+        self.assertEqual((result["passed"], result["total"]), (1, 1))
+
+    def test_background_process_of_the_suite_does_not_outlive_baseline(self):
+        pidfile = make_dir() / "pid"
+        self.addCleanup(_kill_pidfile, pidfile)
+        run, _, _ = make_run(test_cmd=["sh", "-c", f"sleep 30 & echo $! > '{pidfile}'; "
+                                                   "echo 'Ran 1 test in 0.0s'; echo OK"])
+        result = bl.run_baseline(run, "BACK", 60)
+        self.assertEqual(result["passed"], 1)
+        pid = int(pidfile.read_text())
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return
+            time.sleep(0.05)
+        self.fail("the suite's background process outlived baseline")
+
+    def test_a_pre_server_lives_through_the_suite(self):
+        pidfile = make_dir() / "pid"
+        self.addCleanup(_kill_pidfile, pidfile)
+        check = (f"import os, sys\nos.kill(int(open({str(pidfile)!r}).read()), 0)\n"
+                 "print('Ran 1 test in 0.0s'); print('OK')")
+        run, _, _ = make_run(pre=[["sh", "-c", f"sleep 30 > /dev/null 2>&1 & echo $! > '{pidfile}'"]],
+                             test_cmd=[sys.executable, "-c", check])
+        result = bl.run_baseline(run, "BACK", 60)
+        self.assertEqual((result["passed"], result["exit_code"]), (1, 0), result)
+
+    def test_timeout_is_kept_with_a_detached_grandchild(self):
+        run, repo, _ = make_run(test_cmd=self._detached("import time; time.sleep(60)"))
+        started = time.monotonic()
+        result = bl.run_baseline(run, "BACK", 2)
+        self.assertLess(time.monotonic() - started, 10)
+        self.assertTrue(result["timed_out"])
+        self.assertEqual(len(git(repo, "worktree", "list").splitlines()), 1)
+
+    def _hook(self, hooks_dir: Path) -> Path:
+        marker = make_dir() / "hook-ran"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        hook = hooks_dir / "post-checkout"
+        hook.write_text(f"#!/bin/sh\necho ran > '{marker}'\n", encoding="utf-8")
+        hook.chmod(0o755)
+        return marker
+
+    def test_repo_hooks_never_run(self):
+        run, repo, _ = make_run()
+        marker = self._hook(repo / ".git" / "hooks")
+        result = bl.run_baseline(run, "BACK", 60)
+        self.assertEqual(result["passed"], 1)
+        self.assertFalse(marker.exists(), "the audited repo's post-checkout hook ran")
+
+    def test_hooks_path_of_the_repo_never_runs(self):
+        run, repo, _ = make_run()
+        marker = self._hook(repo / ".husky")
+        git(repo, "config", "core.hooksPath", ".husky")
+        bl.run_baseline(run, "BACK", 60)
+        self.assertFalse(marker.exists(), "the core.hooksPath hook ran")
+
+    def _not_executable(self) -> str:
+        path = make_dir() / "notexec"
+        path.write_bytes(b"\x00\x01garbage")
+        path.chmod(0o755)
+        return str(path)
+
+    def test_exec_format_error_recorded_not_raised(self):
+        run, repo, _ = make_run(test_cmd=[self._not_executable()])
+        result = bl.run_baseline(run, "BACK", 60)
+        self.assertFalse(result["measured"])
+        self.assertIn("could not start", result["error"])
+        self.assertEqual(runmod.load(run)["baseline"]["BACK"]["result"]["error"], result["error"])
+        self.assertEqual(len(git(repo, "worktree", "list").splitlines()), 1)
+
+    def test_coverage_exec_format_error_is_a_coverage_error(self):
+        run, _, _ = make_run(coverage_cmd=[self._not_executable()])
+        result = bl.run_baseline(run, "BACK", 60)
+        self.assertEqual(result["passed"], 1)
+        self.assertIn("could not start", result["coverage_error"])
+
     def test_missing_command_recorded_not_raised(self):
         run, _, _ = make_run(test_cmd=["definitely-not-a-binary-xyz"])
         result = bl.run_baseline(run, "BACK", 60)
@@ -298,6 +404,52 @@ class BaselineCliTest(unittest.TestCase):
         manifest = runmod.load(run)
         self.assertTrue(manifest["baseline"]["BACK"]["result"]["timed_out"])
         self.assertNotEqual(manifest["steps"]["baseline"], "done")
+
+    def _killed_mid_suite(self, signum: int):
+        """Starts `ia baseline` on a long suite, sends `signum` to ia once the suite runs; (returncode, suite pid, repo)."""
+        pidfile = make_dir() / "pid"
+        self.addCleanup(_kill_pidfile, pidfile)
+        code = f"import os, time\nopen({str(pidfile)!r}, 'w').write(str(os.getpid()))\ntime.sleep(60)\n"
+        run, repo, _ = make_run(test_cmd=[sys.executable, "-c", code])
+        # A shell starts background jobs with SIGINT ignored, and Python keeps an inherited SIG_IGN: give ia the
+        # default disposition a terminal would, so the test does not depend on how the suite itself was launched.
+        proc = subprocess.Popen([sys.executable, str(SKILL / "ia.py"), "baseline", "--run", str(run), "--timeout", "120"],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
+        deadline = time.monotonic() + 30
+        while not (pidfile.exists() and pidfile.read_text()) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertTrue(pidfile.exists(), "the suite never started")
+        proc.send_signal(signum)
+        proc.communicate(timeout=30)
+        return proc.returncode, int(pidfile.read_text()), repo
+
+    def _assert_cleaned(self, suite_pid: int, repo) -> None:
+        deadline = time.monotonic() + 5
+        alive = True
+        while alive and time.monotonic() < deadline:
+            try:
+                os.kill(suite_pid, 0)
+                time.sleep(0.05)
+            except ProcessLookupError:
+                alive = False
+        self.assertFalse(alive, "the suite outlived ia")
+        self.assertEqual(len(git(repo, "worktree", "list").splitlines()), 1)
+
+    def test_sigterm_kills_the_suite_and_removes_the_worktree(self):
+        code, pid, repo = self._killed_mid_suite(signal.SIGTERM)
+        self.assertEqual(code, 128 + signal.SIGTERM)
+        self._assert_cleaned(pid, repo)
+
+    def test_sighup_kills_the_suite_and_removes_the_worktree(self):
+        code, pid, repo = self._killed_mid_suite(signal.SIGHUP)
+        self.assertEqual(code, 128 + signal.SIGHUP)
+        self._assert_cleaned(pid, repo)
+
+    def test_sigint_kills_the_suite_and_removes_the_worktree(self):
+        code, pid, repo = self._killed_mid_suite(signal.SIGINT)
+        self.assertEqual(code, 128 + signal.SIGINT)
+        self._assert_cleaned(pid, repo)
 
     def test_set_manual_result_closes_step_with_source_manual(self):
         run, _, _ = make_run(test_cmd=[sys.executable, "-c", "print('???')"])

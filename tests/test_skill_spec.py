@@ -30,8 +30,9 @@ class SkillSpecTest(unittest.TestCase):
             self.assertIn(flag, options, f"SKILL.md mentions {flag}, which no ia command has")
 
     def test_exit_codes_in_skill_match_cli(self):
-        self.assertIn("0 ok, 1 the command found problems, 2 usage error, 3 an external tool failed or is missing", SKILL_MD)
-        self.assertEqual((cli.OK, cli.FINDINGS, cli.USAGE, cli.FAILED), (0, 1, 2, 3))
+        self.assertIn("0 ok, 1 the command found problems, 2 usage error, 3 an external tool failed or is missing, "
+                      "4 ia itself failed", SKILL_MD)
+        self.assertEqual((cli.OK, cli.FINDINGS, cli.USAGE, cli.FAILED, cli.INTERNAL), (0, 1, 2, 3, 4))
 
 
 if __name__ == "__main__":

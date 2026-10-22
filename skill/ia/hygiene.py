@@ -133,7 +133,8 @@ def _token_hit(line: str) -> bool:
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(["git", *args], cwd=str(repo), capture_output=True, text=True, errors="replace")
+        return subprocess.run(["git", *args], cwd=str(repo), capture_output=True, text=True, errors="replace",
+                              stdin=subprocess.DEVNULL)
     except (OSError, ValueError) as exc:
         raise runmod.ToolError(f"git is not available: {exc}")
 
