@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
 import sys
+import time
 import unittest
 from pathlib import Path
 
@@ -19,6 +22,13 @@ def plan(**over) -> dict:
             "env": {}, "pre": [], "deps": "none", "deps_dirs": [], "install_cmd": None}
     base.update(over)
     return base
+
+
+def _kill_pidfile(pidfile: Path) -> None:
+    try:
+        os.kill(int(pidfile.read_text()), signal.SIGKILL)
+    except (OSError, ValueError):
+        pass
 
 
 def make_run(files=None, subdir="", **plan_over):
@@ -157,6 +167,32 @@ class RunBaselineTest(unittest.TestCase):
         result = bl.run_baseline(run, "BACK", 1)
         self.assertTrue(result["timed_out"])
         self.assertFalse(result["measured"])
+        self.assertEqual(len(git(repo, "worktree", "list").splitlines()), 1)
+
+    def _detached(self, then: str) -> list:
+        """A suite that starts a grandchild in its own session (out of the suite's process group) holding stdout,
+        records its pid for cleanup, then runs `then`."""
+        pidfile = make_dir() / "pid"
+        self.addCleanup(_kill_pidfile, pidfile)
+        code = ("import subprocess, sys\n"
+                f"p = subprocess.Popen(['sleep', '30'], start_new_session=True)\n"
+                f"open({str(pidfile)!r}, 'w').write(str(p.pid))\n" + then)
+        return [sys.executable, "-c", code]
+
+    def test_suite_that_exits_is_not_held_by_a_detached_grandchild(self):
+        run, _, _ = make_run(test_cmd=self._detached("print('Ran 1 test in 0.0s'); print('OK')"))
+        started = time.monotonic()
+        result = bl.run_baseline(run, "BACK", 60)
+        self.assertLess(time.monotonic() - started, 10)
+        self.assertFalse(result["timed_out"])
+        self.assertEqual((result["passed"], result["total"]), (1, 1))
+
+    def test_timeout_is_kept_with_a_detached_grandchild(self):
+        run, repo, _ = make_run(test_cmd=self._detached("import time; time.sleep(60)"))
+        started = time.monotonic()
+        result = bl.run_baseline(run, "BACK", 2)
+        self.assertLess(time.monotonic() - started, 10)
+        self.assertTrue(result["timed_out"])
         self.assertEqual(len(git(repo, "worktree", "list").splitlines()), 1)
 
     def test_missing_command_recorded_not_raised(self):

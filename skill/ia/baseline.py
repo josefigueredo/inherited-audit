@@ -103,19 +103,30 @@ class _Chunks:
 
 
 def _exec(cmd: List[str], cwd: Path, env: Dict[str, str], deadline: float) -> Tuple[Optional[int], bytes, bool]:
-    """Runs one command in its own process group; returns (exit code, merged output, timed out)."""
-    proc = subprocess.Popen(cmd, cwd=str(cwd), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            stdin=subprocess.DEVNULL, start_new_session=True)
-    try:
-        out, _ = proc.communicate(timeout=max(deadline - time.monotonic(), 0.1))
-        return proc.returncode, out, False
-    except subprocess.TimeoutExpired:
+    """Runs one command in its own process group; returns (exit code, merged output, timed out).
+
+    The output goes to a temp file, not a pipe: a grandchild that left the group (its own session, a daemon) can
+    keep a pipe open forever, and reading it to EOF would ignore both the command's exit and the deadline.
+    """
+    with tempfile.TemporaryFile() as sink:
+        proc = subprocess.Popen(cmd, cwd=str(cwd), env=env, stdout=sink, stderr=subprocess.STDOUT,
+                                stdin=subprocess.DEVNULL, start_new_session=True)
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            proc.kill()
-        out, _ = proc.communicate()
-        return None, out or b"", True
+            code: Optional[int] = proc.wait(timeout=max(deadline - time.monotonic(), 0.1))
+            expired = False
+        except subprocess.TimeoutExpired:
+            code, expired = None, True
+            _kill_group(proc)
+        sink.seek(0)
+        return code, sink.read(), expired
+
+
+def _kill_group(proc: subprocess.Popen) -> None:
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        proc.kill()
+    proc.wait()
 
 
 def _worktree_cwd(repo_path: Path, subdir: str, wt: Path) -> Path:
