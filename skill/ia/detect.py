@@ -160,7 +160,29 @@ class JvmDetector:
         return plan
 
 
-DETECTORS: list = [JvmDetector(), TsJsDetector(), PythonDetector()]
+GO_OFFLINE = ("GOPROXY=off", "GOTOOLCHAIN=local")
+
+
+class GoDetector:
+    """Go modules. The module cache lives outside the repo, so the suite runs with GOPROXY=off (no download) and
+    GOTOOLCHAIN=local (no toolchain download either); `go mod download` is the suggested install. `go test -json`
+    gives exact counts, also for packages that fail to build."""
+    name = "go"
+
+    def matches(self, root: Path) -> bool:
+        return (root / "go.mod").is_file()
+
+    def plan(self, root: Path, sha: Optional[str] = None) -> dict:
+        offline = " ".join(GO_OFFLINE)
+        plan = _base_plan()
+        plan.update(test_cmd=["env", *GO_OFFLINE, "go", "test", "-json", "./..."],
+                    coverage_cmd=["sh", "-c", f"{offline} go test -coverprofile=.ia-cover.out ./... > /dev/null && "
+                                              f"{offline} go tool cover -func=.ia-cover.out"],
+                    install_cmd=["go", "mod", "download"], measure=["golangci-lint"])
+        return plan
+
+
+DETECTORS: list = [JvmDetector(), GoDetector(), TsJsDetector(), PythonDetector()]
 
 MODULE_CONTAINERS = ("src/modules", "src/features", "src/app", "app", "src/components")
 NOT_MODULES = {"tests", "test", "__tests__", "spec", "specs", "e2e", "node_modules", "dist", "build", "out", "target",
@@ -199,6 +221,8 @@ def detect_modules(root: Path) -> List[str]:
     root = Path(root)
     if JvmDetector().matches(root):
         return _jvm_modules(root)
+    if GoDetector().matches(root):
+        return _go_modules(root)
     found = set()
     for container in MODULE_CONTAINERS:
         found.update(f"{container}/{n}" for n in _module_dirs(root / container))
@@ -260,6 +284,45 @@ def _jvm_modules(root: Path) -> List[str]:
         resources = project / "src/main/resources"
         if resources.is_dir() and any(files for _, _, files in os.walk(resources)):
             found.add(resources.relative_to(root).as_posix())
+    return sorted(found)
+
+
+GO_CONTAINERS = ("cmd", "internal", "pkg")
+GO_SKIP = {"vendor", "testdata"}
+
+
+def _go_dirs(parent: Path) -> List[str]:
+    """Subdirectories of `parent` holding Go code somewhere below (not vendor/, testdata/ or test-only folders)."""
+    names = []
+    for name in _module_dirs(parent):
+        if name in GO_SKIP:
+            continue
+        for here, dirs, files in os.walk(parent / name):
+            dirs[:] = [d for d in dirs if d not in GO_SKIP and not d.startswith(".")]
+            if any(f.endswith(".go") for f in files):
+                names.append(name)
+                break
+    return names
+
+
+def _has_go_files(folder: Path) -> bool:
+    try:
+        return any(p.is_file() and p.name.endswith(".go") for p in folder.iterdir())
+    except OSError:
+        return False
+
+
+def _go_modules(root: Path) -> List[str]:
+    """The Go layout: every command under cmd/, every package under internal/ and pkg/, every other top-level package
+    folder, `<container>/.` for Go files directly in a container, and `.` for the root package."""
+    found = set()
+    for container in GO_CONTAINERS:
+        found.update(f"{container}/{n}" for n in _go_dirs(root / container))
+        if _has_go_files(root / container):
+            found.add(f"{container}/{ROOT_FILES}")
+    found.update(n for n in _go_dirs(root) if n not in GO_CONTAINERS)
+    if _has_go_files(root):
+        found.add(ROOT_FILES)
     return sorted(found)
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -12,6 +13,7 @@ from pathlib import Path
 from helpers import SKILL, git, make_dir, make_git_repo, run_cli, write_tree
 
 from ia import baseline as bl
+from ia import detect
 from ia import run as runmod
 
 UNITTEST_CMD = [sys.executable, "-m", "unittest", "discover", "-s", "tests"]
@@ -169,6 +171,71 @@ class JunitAndJvmTextTest(unittest.TestCase):
     def test_gradle_text_summary(self):
         r = bl.parse_summary("> Task :test FAILED\n\n7 tests completed, 2 failed, 1 skipped\n\nBUILD FAILED in 3s\n")
         self.assertEqual((r["passed"], r["failed"], r["total"], r["runner"]), (4, 2, 6, "gradle"))
+
+
+def _go_event(action, package="m/a", test=None):
+    event = {"Time": "2026-10-22T00:00:00Z", "Action": action, "Package": package}
+    if test:
+        event["Test"] = test
+    return json.dumps(event)
+
+
+class GoJsonTest(unittest.TestCase):
+    def test_counts_top_level_tests_only(self):
+        text = "\n".join([_go_event("run", test="TestA"), _go_event("pass", test="TestA"),
+                          _go_event("pass", test="TestB/sub1"), _go_event("fail", test="TestB/sub2"),
+                          _go_event("fail", test="TestB"), _go_event("skip", test="TestC"),
+                          _go_event("output", test="TestA"), _go_event("fail")])
+        r = bl.parse_summary(text)
+        self.assertEqual((r["passed"], r["failed"], r["total"], r["runner"]), (1, 1, 2, "go"))
+
+    def test_a_package_that_fails_without_a_failing_test_counts_once(self):
+        text = "\n".join([_go_event("pass", "m/a", "TestA"), _go_event("pass", "m/a"),
+                          _go_event("fail", "m/b"),
+                          "FAIL\tm/c [build failed]", "# m/c", "c.go:3:1: syntax error"])
+        r = bl.parse_summary(text)
+        self.assertEqual((r["passed"], r["failed"], r["total"]), (1, 2, 3))
+
+    def test_go_cover_func_total(self):
+        r = bl.parse_summary("m/a/a.go:3:\tF\t100.0%\ntotal:\t\t\t(statements)\t72.5%\n")
+        self.assertEqual(r["coverage"], 72.5)
+
+
+@unittest.skipUnless(shutil.which("go"), "go is not installed")
+class GoBaselineTest(unittest.TestCase):
+    def test_real_go_suite_offline(self):
+        files = {"go.mod": "module example.com/m\n\ngo 1.21\n",
+                 "calc/calc.go": "package calc\n\nfunc Add(a, b int) int { return a + b }\n",
+                 "calc/calc_test.go": ('package calc\n\nimport "testing"\n\n'
+                                       'func TestAdd(t *testing.T) { if Add(1, 2) != 3 { t.Fatal("add") } }\n'
+                                       'func TestBroken(t *testing.T) { if Add(1, 1) != 3 { t.Fatal("expected") } }\n'
+                                       'func TestTable(t *testing.T) {\n'
+                                       '\tt.Run("one", func(t *testing.T) {})\n\tt.Run("two", func(t *testing.T) {})\n}\n')}
+        repo, sha = make_git_repo(files)
+        run = make_dir() / "run"
+        runmod.init_run("sys", [("BACK", repo, "")], run, "es", False, "unknown")
+        manifest = runmod.load(run)
+        manifest["baseline"]["BACK"] = {"plan": detect.detect_repo(repo, sha)}
+        runmod.save(run, manifest)
+        result = bl.run_baseline(run, "BACK", 300)
+        self.assertEqual((result["passed"], result["failed"], result["total"], result["runner"]), (2, 1, 3, "go"),
+                         (run / result["output"]).read_text(encoding="utf-8")[-2000:])
+        self.assertEqual(result.get("coverage_error"), "skipped: suite failing")
+
+    def test_real_go_coverage_when_green(self):
+        files = {"go.mod": "module example.com/m\n\ngo 1.21\n",
+                 "calc/calc.go": "package calc\n\nfunc Add(a, b int) int { return a + b }\n\nfunc Sub(a, b int) int { return a - b }\n",
+                 "calc/calc_test.go": ('package calc\n\nimport "testing"\n\n'
+                                       'func TestAdd(t *testing.T) { if Add(1, 2) != 3 { t.Fatal("add") } }\n')}
+        repo, sha = make_git_repo(files)
+        run = make_dir() / "run"
+        runmod.init_run("sys", [("BACK", repo, "")], run, "es", False, "unknown")
+        manifest = runmod.load(run)
+        manifest["baseline"]["BACK"] = {"plan": detect.detect_repo(repo, sha)}
+        runmod.save(run, manifest)
+        result = bl.run_baseline(run, "BACK", 300)
+        self.assertEqual((result["passed"], result["failed"]), (1, 0))
+        self.assertEqual(result["coverage"], 50.0, result.get("coverage_error"))
 
 
 class RunBaselineTest(unittest.TestCase):

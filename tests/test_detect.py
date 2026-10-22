@@ -192,6 +192,34 @@ class JvmModuleTests(unittest.TestCase):
             "core/src/main/kotlin/io/acme/core/domain"])
 
 
+class GoTests(unittest.TestCase):
+    def test_go_runs_offline_with_the_local_toolchain(self):
+        plan = detect.detect_repo(_tree({"go.mod": "module example.com/shop\n\ngo 1.22\n"}))
+        self.assertEqual((plan["stack"], plan["measured"]), ("go", True))
+        self.assertEqual(plan["test_cmd"], ["env", "GOPROXY=off", "GOTOOLCHAIN=local", "go", "test", "-json", "./..."])
+        self.assertEqual(plan["coverage_cmd"][:2], ["sh", "-c"])
+        self.assertIn("go tool cover -func", plan["coverage_cmd"][2])
+        self.assertIn("GOPROXY=off", plan["coverage_cmd"][2])
+        self.assertEqual(plan["install_cmd"], ["go", "mod", "download"])
+        self.assertEqual((plan["deps"], plan["deps_dirs"], plan["measure"]), ("none", [], ["golangci-lint"]))
+
+    def test_go_wins_over_a_tooling_package_json(self):
+        plan = detect.detect_repo(_tree({"go.mod": "module m\n", "package.json": PKG_VITEST}))
+        self.assertEqual(plan["stack"], "go")
+
+    def test_go_layout_modules(self):
+        root = _tree({
+            "go.mod": "module m\n", "main.go": "package main\n",
+            "cmd/api/main.go": "x", "cmd/worker/main.go": "x",
+            "internal/orders/orders.go": "x", "internal/billing/b.go": "x", "internal/db.go": "x",
+            "pkg/client/c.go": "x", "handlers/h.go": "x", "docs/readme.md": "x",
+            "internal/orders/testdata/f.json": "x", "vendor/x/y.go": "x", "testdata/a.txt": "x",
+        })
+        self.assertEqual(detect.detect_modules(root), [
+            ".", "cmd/api", "cmd/worker", "handlers", "internal/.", "internal/billing", "internal/orders",
+            "pkg/client"])
+
+
 class ToolAndWorkerTests(unittest.TestCase):
     def test_tool_status_uses_which(self):
         status = detect.tool_status(["python3", "definitely-not-a-tool-xyz"])

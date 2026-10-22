@@ -32,6 +32,8 @@ _COUNT = re.compile(r"(\d+) ([A-Za-z]+)")
 _MAVEN = re.compile(r"^(?:\[(?:INFO|WARNING|ERROR)\]\s+)?Tests run: (\d+), Failures: (\d+), Errors: (\d+), "
                     r"Skipped: (\d+)\s*$")
 _GRADLE = re.compile(r"^(\d+) tests? completed(?:, (\d+) failed)?(?:, (\d+) skipped)?")
+_GO_BUILD_FAILED = re.compile(r"^FAIL\s+(\S+)\s+\[(?:build|setup) failed\]")
+_COVER_GO = re.compile(r"^total:\s+\(statements\)\s+([\d.]+)%")
 _COVER_ALL = re.compile(r"^\s*All files\s*\|\s*([\d.]+)")
 _COVER_TOTAL = re.compile(r"^TOTAL\b.*?([\d.]+)%\s*$")
 
@@ -43,15 +45,56 @@ def _counts(chunk: str) -> Dict[str, int]:
     return found
 
 
+def _go_counts(lines: List[str]) -> Optional[Tuple[int, int]]:
+    """(passed, failed) from `go test -json` events, or None when the output has none.
+
+    Top-level tests only (a subtest is part of its test); a package that fails with no failing test (build error,
+    panic in TestMain, setup failure) counts as one failure, as does a `FAIL pkg [build failed]` text line."""
+    passed = failed = 0
+    seen = False
+    test_failed: set = set()
+    package_failed: set = set()
+    for line in lines:
+        m = _GO_BUILD_FAILED.match(line)
+        if m:
+            package_failed.add(m.group(1))
+            continue
+        if not line.startswith("{"):
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict) or "Action" not in event:
+            continue
+        seen = True
+        action, test, package = event.get("Action"), event.get("Test"), event.get("Package")
+        if test and "/" not in str(test):
+            if action == "pass":
+                passed += 1
+            elif action == "fail":
+                failed += 1
+                test_failed.add(package)
+        elif not test and action == "fail":
+            package_failed.add(package)
+    if not seen and not package_failed:
+        return None
+    return passed, failed + len(package_failed - test_failed)
+
+
 def parse_summary(text: str) -> dict:
     """Reads the runner summary from the last lines of a test output."""
     result = {"passed": None, "failed": None, "total": None, "coverage": None, "runner": None}
     every = _ANSI.sub("", text).splitlines()
     lines = every[-TAIL_LINES:]
     for line in lines:
-        m = _COVER_ALL.match(line) or _COVER_TOTAL.match(line)
+        m = _COVER_ALL.match(line) or _COVER_TOTAL.match(line) or _COVER_GO.match(line)
         if m:
             result["coverage"] = float(m.group(1))
+    go = _go_counts(every)
+    if go is not None:
+        result.update(passed=go[0], failed=go[1], total=go[0] + go[1], runner="go")
+        return result
     # Maven prints one summary per module of a reactor build, anywhere in the output: add them all up.
     maven = [tuple(map(int, m.groups())) for m in map(_MAVEN.match, every) if m]
     if maven:
