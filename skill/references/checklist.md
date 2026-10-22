@@ -26,7 +26,12 @@ The step names in backticks are the keys of `manifest.json` `steps`, in order.
 - `ia.py init` refuses a dirty repo and a run dir that git could commit; fix the cause, never work around it.
 - `ia.py detect` writes a plan per repo for TypeScript/JavaScript, Python, Java/Kotlin (Maven or Gradle; `framework:
   spring-boot` when the build uses it) and Go. JVM and Go suites run offline, so a missing dependency cache fails the
-  suite instead of downloading: offer `deps=install` (it runs the plan's `install_cmd` first) and ask. Other stacks
+  suite instead of downloading, and `baseline` says so (`not in the local cache`, never a result): offer `deps=install`
+  and ask. It runs the plan's `install_cmd` first: `go mod download` for Go; for Maven and Gradle a first run of the
+  suite online, because their resolve-only goals leave jars out, so the suite runs twice. Once the cache is filled,
+  set `deps=none` back for later runs. A Go toolchain older than `go.mod` asks for is not a cache problem: the error
+  says which version to ask the person for. Counts flagged `warning` (some dependencies missing next to passing
+  tests) may be partial: tell the person. Other stacks
   come back `unknown`: work out the suite command yourself, set it with
   `ia.py baseline --run DIR --set ALIAS test_cmd=[...]` (and `junit=[...]` when it writes JUnit XML reports), set
   its modules with `ia.py set --run DIR 'modules.ALIAS=[...]'`, and say in the report that the stack was "not measured

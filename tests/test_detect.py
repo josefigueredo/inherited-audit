@@ -137,7 +137,9 @@ class JvmStackTests(unittest.TestCase):
         self.assertEqual((plan["stack"], plan["measured"]), ("jvm", True))
         self.assertEqual(plan["test_cmd"], ["mvn", "-B", "-ntp", "-o", "-Dmaven.test.failure.ignore=true", "test"])
         self.assertEqual(plan["junit"], ["**/target/surefire-reports/TEST-*.xml"])
-        self.assertEqual(plan["install_cmd"], ["mvn", "-B", "-ntp", "dependency:go-offline"])
+        # dependency:go-offline leaves jars and the surefire provider out (measured in Docker on 2026-10-22): the
+        # warm-up is the suite itself, online, failures ignored
+        self.assertEqual(plan["install_cmd"], ["mvn", "-B", "-ntp", "-Dmaven.test.failure.ignore=true", "test"])
         self.assertEqual((plan["deps"], plan["deps_dirs"], plan["coverage_cmd"]), ("none", [], None))
         self.assertNotIn("framework", plan)
 
@@ -151,7 +153,9 @@ class JvmStackTests(unittest.TestCase):
         self.assertEqual(plan["stack"], "jvm")
         self.assertEqual(plan["test_cmd"], ["./gradlew", "test", "--offline", "--continue", "--console=plain"])
         self.assertEqual(plan["junit"], ["**/build/test-results/**/TEST-*.xml"])
-        self.assertEqual(plan["install_cmd"], ["./gradlew", "dependencies", "--console=plain"])
+        # `gradle dependencies` leaves the jars out; `test` exits 1 on a failing test, and the warm-up only fills the
+        # cache: the offline run right after reports anything still missing
+        self.assertEqual(plan["install_cmd"], ["sh", "-c", "./gradlew test --continue --console=plain || true"])
         self.assertEqual(plan["framework"], "spring-boot")
 
     def test_gradle_groovy_without_wrapper(self):
