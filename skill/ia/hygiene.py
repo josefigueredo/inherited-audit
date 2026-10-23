@@ -1,6 +1,7 @@
 """Pre-delivery hygiene: local tooling files, secrets and TruffleHog-prone identifiers in what the audit leaves behind."""
 from __future__ import annotations
 
+import html
 import re
 import subprocess
 from pathlib import Path
@@ -28,12 +29,40 @@ USERINFO = re.compile(r"\b((?i:(?:[a-z][a-z0-9.-]*\+)?https?)://)[^/?#\s\"'<>]+@
 PEM_SPAN = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)")
 B64RUN = re.compile(r"[A-Za-z0-9+/=_-]{60,}")
 EXCERPT = 80
+MASK = "****"
+
+# Values behind a secret-looking name: readable defaults have no secret shape of their own, so the name gives them away.
+SECRET_WORDS = {"token", "tokens", "secret", "secrets", "password", "passwd", "pwd", "passphrase", "credential",
+                "credentials", "apikey"}
+# `key` and `master` alone are everywhere (`- key: DB_HOST`, `keycloak`, `branch: master`): only these compounds count.
+KEY_QUALIFIERS = {"api", "secret", "private", "access", "signing", "encryption", "master", "client", "auth", "hmac",
+                  "jwt", "license", "app", "session"}
+MASTER_PARTNERS = {"value", "key", "token", "secret", "password"}
+# A secret word followed by one of these names a setting about the secret, not the secret (`token-ttl`, `key-store-type`).
+NOT_SECRET_TAIL = {"ttl", "expiration", "expiry", "expires", "length", "size", "timeout", "type", "uri", "url",
+                   "endpoint", "header", "name", "policy", "enabled", "enable", "path", "file", "location", "source",
+                   "prefix", "format", "algorithm", "alg", "validity", "duration", "issuer", "audience", "count", "max",
+                   "min", "store", "id", "mode", "env", "var", "field", "param", "required", "regex", "pattern"}
+CONFIG_SUFFIXES = (".yml", ".yaml", ".properties", ".env", ".conf", ".cfg", ".ini", ".toml")
+_NAME = r"[A-Za-z_][A-Za-z0-9_.-]*"
+PLACEHOLDER = re.compile(r"\$\{(" + _NAME + r")(:-?)([^}]*)\}")
+QUOTED = re.compile(r"""(?<![\w.-])(["']?)(""" + _NAME + r""")\1\s*[:=]\s*(["'])(.*?)\3""")
+HEADER = re.compile(r"""(?i)(?:-H|--header)\s*["']\s*(""" + _NAME + r""")\s*:\s*(?:(?:bearer|basic)\s+)?([^"'\s]+)""")
+BEARER = re.compile(r"(?i)\bauthorization\s*:\s*(?:bearer|basic)\s+([^\s\"'<>$]+)")
+BARE = re.compile(r"""(?<![\w.${-])(""" + _NAME + r""")\s*([:=])[ \t]*(?!["'])([^\s#;,"'}]+)""")
+SCREAMING = re.compile(r"[A-Z][A-Z0-9_]*$")
+NOT_SECRET_VALUE = re.compile(r"(?i)(\*{4}|[$<{%].*|\d+(\.\d+)?[a-z]{0,2}|true|false|null|none|nil|~|"
+                              r"[a-z][a-z0-9+.-]*://.*)$")
+ROW = re.compile(r'<span class="ln[^"]*"><i>\d+</i>(.*?)</span>')
+PRE = re.compile(r"<pre( data-config)?>(.*?)</pre>")
+TAG = re.compile(r"<[^>]+>")
 
 R_TOKEN = "40-char identifier (TruffleHog false positive risk)"
 R_TOOLING = "local tooling file"
 R_SECRET = "possible secret"
 R_CRED = "credentials in a URL"
 R_KEY = "possible key material"
+R_NAMED = "value of a secret-named key"
 
 
 def _mask(match: "re.Match[str]") -> str:
@@ -42,6 +71,91 @@ def _mask(match: "re.Match[str]") -> str:
 
 def _mask_token(match: "re.Match[str]") -> str:
     return match.group(0) if HEX40.fullmatch(match.group(0)) else _mask(match)
+
+
+IDENT_CAMEL = re.compile(r"[A-Za-z][a-z]+(?:[A-Z][a-z]+)+\d{0,3}")
+IDENT_SNAKE = re.compile(r"(?:[a-z]+(?:_[a-z]+)+|[A-Z]+(?:_[A-Z]+)+)\d{0,3}")
+
+
+def looks_like_identifier(token: str) -> bool:
+    """camelCase, PascalCase, snake_case or SCREAMING_SNAKE words with no digits inside: code, not a random token."""
+    return bool(IDENT_CAMEL.fullmatch(token) or IDENT_SNAKE.fullmatch(token))
+
+
+def _mask_token_prose(match: "re.Match[str]") -> str:
+    return match.group(0) if looks_like_identifier(match.group(0)) else _mask_token(match)
+
+
+def masked_tokens(text: str) -> int:
+    """How many 40-char tokens prose masking rewrites in `text` (hex SHAs and code identifiers are kept)."""
+    return sum(1 for t in TOKEN40.findall(text or "") if not HEX40.fullmatch(t) and not looks_like_identifier(t))
+
+
+def _words(name: str) -> List[str]:
+    out: List[str] = []
+    for part in re.split(r"[_.\-]+", name):
+        out += [w.lower() for w in re.findall(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+", part)]
+    return out
+
+
+def secret_name(name: str) -> bool:
+    """True when a key or variable name says its value is a secret (`DB_PASSWORD`, `apiKey`, `MASTER_TOKEN_VALUE`)."""
+    words = _words(name)
+    if not words or words[-1] in NOT_SECRET_TAIL:
+        return False
+    if any(w in SECRET_WORDS for w in words):
+        return True
+    for i, w in enumerate(words):
+        if w == "key" and i > 0 and words[i - 1] in KEY_QUALIFIERS:
+            return True
+        if w == "master" and any(x in MASTER_PARTNERS for x in words[i + 1:]):
+            return True
+    return False
+
+
+def is_config_path(path: str) -> bool:
+    """Config files, where a bare `key: value` or `KEY=value` is a literal, not code."""
+    name = (path or "").rsplit("/", 1)[-1].lower()
+    return name.endswith(CONFIG_SUFFIXES) or name.startswith(".env")
+
+
+def _hides(value: str) -> bool:
+    return bool(value) and not NOT_SECRET_VALUE.match(value)
+
+
+def mask_named(line: str, config: bool = False) -> str:
+    """`line` with the value behind every secret-named key masked as `****`: a `${NAME:default}` default, a quoted
+    literal, a curl header or bearer token, a `SCREAMING_NAME=value` and, in config files (`config`), any bare
+    `key: value` or `key=value`. Idempotent."""
+    def placeholder(m: "re.Match[str]") -> str:
+        if not secret_name(m.group(1)) or not _hides(m.group(3)):
+            return m.group(0)
+        return "${" + m.group(1) + m.group(2) + MASK + "}"
+
+    def quoted(m: "re.Match[str]") -> str:
+        if not secret_name(m.group(2)) or not _hides(m.group(4)):
+            return m.group(0)
+        return m.group(0)[:m.start(4) - m.start(0)] + MASK + m.group(3)
+
+    def header(m: "re.Match[str]") -> str:
+        if not secret_name(m.group(1)) or not _hides(m.group(2)):
+            return m.group(0)
+        return m.group(0)[:m.start(2) - m.start(0)] + MASK
+
+    def bearer(m: "re.Match[str]") -> str:
+        return m.group(0) if not _hides(m.group(1)) else m.group(0)[:m.start(1) - m.start(0)] + MASK
+
+    def bare(m: "re.Match[str]") -> str:
+        name, sep, value = m.group(1), m.group(2), m.group(3)
+        if not (config or (sep == "=" and SCREAMING.match(name))) or not secret_name(name) or not _hides(value):
+            return m.group(0)
+        return m.group(0)[:m.start(3) - m.start(0)] + MASK
+
+    text = PLACEHOLDER.sub(placeholder, line)
+    text = QUOTED.sub(quoted, text)
+    text = HEADER.sub(header, text)
+    text = BEARER.sub(bearer, text)
+    return BARE.sub(bare, text)
 
 
 def has_credentials(url: str) -> bool:
@@ -62,20 +176,24 @@ def _opens_key(line: str, start: int = 0) -> bool:
     return last is not None and not PEM_END.search(line, last.end())
 
 
-def mask_line(line: str) -> str:
-    """The line with every secret, URL userinfo and flagged 40-char token masked, whitespace intact."""
+def mask_line(line: str, prose: bool = False, config: bool = False) -> str:
+    """The line with every secret, URL userinfo, secret-named value and flagged 40-char token masked, whitespace
+    intact. `prose` keeps 40-char code identifiers (camelCase, snake_case); `config` masks bare `key: value` too."""
     text = PEM_SPAN.sub("****", line)
     text = USERINFO.sub(lambda m: (m.group(1) or m.group(2)) + "****@", text)
     for pattern in SECRETS:
         text = pattern.sub(_mask, text)
-    return TOKEN40.sub(_mask_token, text)
+    text = mask_named(text, config)
+    return TOKEN40.sub(_mask_token_prose if prose else _mask_token, text)
 
 
 class KeyMasker:
     """Line-by-line masking that knows about PEM private-key blocks: BEGIN..END (inclusive) is masked whole."""
 
-    def __init__(self, inside: bool = False) -> None:
+    def __init__(self, inside: bool = False, prose: bool = False, config: bool = False) -> None:
         self.inside = inside
+        self.prose = prose
+        self.config = config
 
     def line(self, line: str) -> str:
         """The masked line; advances the key-block state."""
@@ -85,12 +203,13 @@ class KeyMasker:
                 self.inside = _opens_key(line, end.end())
             return line[:len(line) - len(line.lstrip())] + "****" if line.strip() else line
         self.inside = _opens_key(line)
-        return mask_line(line)
+        return mask_line(line, self.prose, self.config)
 
 
-def mask_text(text: str, inside: bool = False) -> str:
-    """`text` with every line masked (PEM blocks included); the number of lines is unchanged."""
-    masker = KeyMasker(inside)
+def mask_text(text: str, inside: bool = False, prose: bool = False) -> str:
+    """`text` with every line masked (PEM blocks included); the number of lines is unchanged. `prose` keeps 40-char
+    code identifiers."""
+    masker = KeyMasker(inside, prose)
     return "\n".join(masker.line(raw) for raw in text.split("\n"))
 
 
@@ -256,11 +375,43 @@ def check_findings(run: Path) -> List[str]:
     return out
 
 
+def _named_excerpt(text: str) -> str:
+    """The line masked with the config rules too, trimmed to EXCERPT chars around the first mask."""
+    text = mask_line(text, config=True).strip()
+    at = text.find(MASK)
+    start = max(0, at - 40) if at >= 0 else 0
+    return text[start:start + EXCERPT]
+
+
+def _named_hits(line: str) -> List[str]:
+    """Unmasked secret-named values in one HTML line: code rows of a `<pre>` one by one (bare `key: value` only in a
+    config file's `<pre data-config>`), and the text outside them."""
+    hits: List[str] = []
+    for pre in PRE.finditer(line):
+        config = bool(pre.group(1))
+        for row in ROW.findall(pre.group(2)):
+            text = html.unescape(TAG.sub("", row))
+            if mask_named(text, config) != text:
+                hits.append(_named_excerpt(text))
+    rest = html.unescape(TAG.sub(" ", PRE.sub(" ", line)))
+    if mask_named(rest) != rest:
+        hits.append(_named_excerpt(rest))
+    return hits
+
+
 def check_reports(run: Path) -> List[str]:
-    """Rendered reports (`<run>/*.html`) must carry no unmasked secret."""
+    """Rendered reports (`<run>/*.html`) must carry no unmasked secret, including the value behind a secret-named key
+    (`${API_TOKEN:default}`, `password: ...` in a config file's snippet)."""
     out: List[str] = []
     for path in sorted(p for p in Path(run).glob("*.html") if p.is_file()):
         out += _scan_file(path, path.name)
+        keys = KeyMasker()
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if keys.inside:
+                keys.line(line)
+                continue
+            keys.line(line)
+            out += [f"{path.name}: {R_NAMED}: {hit}" for hit in _named_hits(line)]
     return out
 
 

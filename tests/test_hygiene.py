@@ -408,5 +408,99 @@ class MaskLineTest(unittest.TestCase):
         self.assertEqual(hygiene.mask_line("plain"), "plain")
 
 
+DEFAULT = "s3cr3tDefault9"  # a readable default: no secret pattern of its own
+IDENT40 = "provideObservabilityConfigurationService"
+RANDOM40 = "q8ZtR2vXk9LmP4wNs7YbH3jDf6GcA1eUo5TiK0rB"
+
+
+class NamedSecretTest(unittest.TestCase):
+    def test_placeholder_default_of_a_secret_named_variable_is_masked(self):
+        line = "      value: ${SECURITY_API_TOKEN_MASTER_VALUE:" + DEFAULT + "}"
+        self.assertEqual(hygiene.mask_named(line), "      value: ${SECURITY_API_TOKEN_MASTER_VALUE:****}")
+        self.assertEqual(hygiene.mask_named("x=${DB_PASSWORD:-" + DEFAULT + "}"), "x=${DB_PASSWORD:-****}")
+        self.assertNotIn(DEFAULT, hygiene.mask_line("@Value(\"${app.client-secret:" + DEFAULT + "}\")"))
+
+    def test_placeholder_of_a_plain_variable_is_kept(self):
+        for line in ("source: ${SECURITY_API_TOKEN_MASTER_SOURCE:env}", "port: ${SERVER_PORT:8080}",
+                     "password: ${DB_PASSWORD}", "password: ${DB_PASSWORD:}"):
+            self.assertEqual(hygiene.mask_named(line, config=True), line)
+
+    def test_bare_config_assignment_masked_only_in_config_files(self):
+        self.assertEqual(hygiene.mask_named("  password: " + DEFAULT, config=True), "  password: ****")
+        self.assertEqual(hygiene.mask_named("spring.datasource.password=" + DEFAULT, config=True),
+                         "spring.datasource.password=****")
+        self.assertEqual(hygiene.mask_named("  api-key: " + DEFAULT + "  # dev", config=True), "  api-key: ****  # dev")
+        code = "    String token = tokenService.find(id);"
+        self.assertEqual(hygiene.mask_named(code), code)
+        self.assertEqual(hygiene.mask_named("  password: " + DEFAULT), "  password: " + DEFAULT)
+
+    def test_quoted_literal_and_screaming_env_masked_in_any_file(self):
+        self.assertEqual(hygiene.mask_named('const apiKey = "' + DEFAULT + '";'), 'const apiKey = "****";')
+        self.assertEqual(hygiene.mask_named('{"client_secret": "' + DEFAULT + '"}'), '{"client_secret": "****"}')
+        self.assertEqual(hygiene.mask_named("export DB_PASSWORD=" + DEFAULT), "export DB_PASSWORD=****")
+
+    def test_curl_header_with_a_secret_name_masked(self):
+        line = "  -H 'X-API-Token: " + DEFAULT + "' \\"
+        self.assertEqual(hygiene.mask_named(line), "  -H 'X-API-Token: ****' \\")
+        self.assertNotIn(DEFAULT, hygiene.mask_named('Authorization: Bearer ' + DEFAULT))
+
+    def test_values_and_names_that_are_not_secrets_are_kept(self):
+        for line in ("token-ttl: 3600", "token-enabled: true", "token-uri: https://oauth2.example.com/token",
+                     "- key: DB_HOST", "key-store-type: PKCS12", "keycloak: realm", "cache-key-prefix: users",
+                     "primaryKey: id", "token-header-name: X-API-Token", "password: ****",
+                     "password: <your-password>", "api-key: $API_KEY", "tokenizer: standard"):
+            self.assertEqual(hygiene.mask_named(line, config=True), line)
+
+    def test_masking_is_idempotent(self):
+        for line, config in (("value: ${MASTER_TOKEN:" + DEFAULT + "}", False), ("password: " + DEFAULT, True),
+                             ('secret = "' + DEFAULT + '"', False), ("-H 'X-API-Token: " + DEFAULT + "'", False)):
+            once = hygiene.mask_named(line, config=config)
+            self.assertNotIn(DEFAULT, once)
+            self.assertEqual(hygiene.mask_named(once, config=config), once)
+
+    def test_reports_flag_unmasked_named_secrets_without_echoing_them(self):
+        run = make_dir()
+        row = '<span class="ln"><i>192</i>      value: ${SECURITY_API_TOKEN_MASTER_VALUE:' + DEFAULT + '}</span>'
+        cfg = '<span class="ln hl"><i>3</i>  password: ' + DEFAULT + '</span>'
+        write_tree(run, {"r-correctness.html": '<figure class="code"><pre><span class="ln"><i>191</i>  x:</span>'
+                                               + row + '</pre></figure>\n',
+                         "r-quality.html": '<pre data-config><span class="ln"><i>2</i>a: 1</span>' + cfg + '</pre>\n'})
+        out = hygiene.check_reports(run)
+        self.assertEqual(len(out), 2, out)
+        for line in out:
+            self.assertNotIn(DEFAULT, line)
+            self.assertIn(hygiene.R_NAMED, line)
+
+    def test_reports_with_masked_or_non_config_values_are_clean(self):
+        run = make_dir()
+        write_tree(run, {"r.html": '<pre><span class="ln"><i>1</i>value: ${MASTER_TOKEN:****}</span>'
+                                   '<span class="ln"><i>2</i>password: plain-in-code</span></pre>\n'
+                                   '<p>The token: is rotated daily.</p>\n'})
+        self.assertEqual(hygiene.check_reports(run), [])
+
+
+class ProseIdentifierTest(unittest.TestCase):
+    def test_prose_keeps_a_40_char_code_identifier(self):
+        text = f"Rename the bean to {IDENT40}."
+        self.assertEqual(hygiene.mask_text(text, prose=True), text)
+        for ident in ("get_the_observability_configuration_svcs", "GET_THE_OBSERVABILITY_CONFIGURATION_SVCS",
+                      "ProvideObservabilityConfigurationService"):
+            self.assertEqual(len(ident), 40)
+            self.assertEqual(hygiene.mask_line(ident, prose=True), ident)
+
+    def test_prose_still_masks_random_tokens_and_secrets(self):
+        out = hygiene.mask_text(f"token {RANDOM40} and {AWS}", prose=True)
+        self.assertNotIn(RANDOM40, out)
+        self.assertNotIn(AWS, out)
+
+    def test_strict_mode_still_masks_identifiers(self):
+        self.assertNotIn(IDENT40, hygiene.mask_line(IDENT40))
+        self.assertNotIn(IDENT40, hygiene.mask_text(IDENT40))
+
+    def test_masked_tokens_counts_only_what_prose_mode_rewrites(self):
+        self.assertEqual(hygiene.masked_tokens(f"{IDENT40} {SHA40}"), 0)
+        self.assertEqual(hygiene.masked_tokens(f"{RANDOM40} x {RANDOM40[::-1]}"), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

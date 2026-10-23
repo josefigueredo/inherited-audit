@@ -97,7 +97,7 @@ class ReferencesTest(unittest.TestCase):
         text = _read(REFS / "schema.md")
         for field in ("id", "report", "category", "dimension", "title", "verdict", "severity", "confidence",
                       "source", "what_happens", "evidence", "branch", "sha_test", "tests", "red_reason",
-                      "suggestion", "effort", "prod_files", "contrast", "audience", "exclude", "shown"):
+                      "suggestion", "effort", "prod_files", "contrast", "audience", "exclude", "duplicate_of", "shown"):
             self.assertIn(f"`{field}`", text, f"schema.md does not document {field}")
         for key in ("strengths", "sections", "tests_branch", "plan", "result"):
             self.assertIn(key, text)

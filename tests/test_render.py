@@ -9,6 +9,7 @@ from helpers import SKILL, git, make_dir, make_git_repo, run_cli
 
 from ia import filter as filtermod
 from ia import findings as findingsmod
+from ia import hygiene as hygienemod
 from ia import render as rendermod
 from ia import run as runmod
 
@@ -248,6 +249,16 @@ class AnchorAndCountTest(unittest.TestCase):
         ids = re.findall(r'<section id="(cat-[^"]+)"', html)
         self.assertEqual(sorted(ids), ["cat-a-b", "cat-a-b-2", "cat-a-b-3"])
 
+    def test_how_it_was_done_counts_merged_duplicates(self):
+        for lang, phrase in (("es", "duplicados fusionados con otro hallazgo: 1"),
+                             ("en", "duplicates merged into another finding: 1")):
+            run, _, _ = new_run(lang=lang)
+            findingsmod.add(run, base())
+            findingsmod.add(run, base(exclude="duplicate", duplicate_of="C-01"))
+            html = rendermod.render_report(filtered(run), "correctness").read_text(encoding="utf-8")
+            self.assertIn(phrase, html)
+            self.assertNotIn('id="f-c-02"', html)
+
     def test_missing_counts_omit_shown_line(self):
         run, _, _ = new_run()
         findingsmod.add(run, base())
@@ -427,6 +438,41 @@ class SecretMaskTest(unittest.TestCase):
         self.assertNotIn(AWS_KEY, html)
         self.assertIn("AKIA****", html)
         self.assertIn("    key = ", html)
+
+    def test_secret_named_default_in_context_lines_is_masked_and_hygiene_is_clean(self):
+        default = "s3cr3tDefault9"
+        yml = "".join(f"k{n}: v\n" for n in range(1, 21)).replace(
+            "k3: v\n", "    value: ${SECURITY_API_TOKEN_MASTER_VALUE:" + default + "}\n").replace(
+            "k4: v\n", "    password: " + default + "\n")
+        run, _, _ = new_run(files={"src/a.py": SRC, "src/application.yml": yml})
+        findingsmod.add(run, base(evidence=[{"cite": "BACK/src/application.yml", "from": 6, "to": 7, "note": "n"}]))
+        filtered(run)
+        for report in ("correctness", "quality"):
+            rendermod.render_report(run, report)
+        html = "".join(p.read_text(encoding="utf-8") for p in run.glob("*.html"))
+        self.assertNotIn(default, html)
+        self.assertIn("${SECURITY_API_TOKEN_MASTER_VALUE:****}", html)
+        self.assertIn("<pre data-config>", html)
+        self.assertEqual(hygienemod.check_reports(run), [])
+
+    def test_secret_named_value_in_old_prose_is_masked_by_the_filter_rewrite(self):
+        run, _, _ = new_run()
+        findingsmod.add(run, base())
+        path = run / "findings" / "C-01.json"
+        raw = path.read_text(encoding="utf-8").replace('"It breaks."', '"Sends {\\"api_key\\": \\"opaque1\\"}."')
+        path.write_text(raw, encoding="utf-8")
+        filtered(run)
+        rendermod.render_report(run, "correctness")
+        html = "".join(p.read_text(encoding="utf-8") for p in run.glob("*.html"))
+        self.assertNotIn("opaque1", html)
+        self.assertEqual(hygienemod.check_reports(run), [])
+
+    def test_code_snippet_keeps_bare_assignments(self):
+        src = SRC.replace("line 5\n", "    token = token_service.find(user)\n")
+        run, _, _ = new_run(files={"src/a.py": src})
+        text = rendermod.snippet(runmod.load(run)["repos"][0], "src/a.py", 5, 5)
+        self.assertIn("token = token_service.find(user)", text)
+        self.assertTrue(text.startswith("<pre>"))
 
     def test_findings_added_after_filter_warn_on_stderr(self):
         run, _, _ = new_run()

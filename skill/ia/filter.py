@@ -21,7 +21,7 @@ def refute_hides(f: dict) -> bool:
 
 
 def is_shown(f: dict) -> bool:
-    if f.get("confidence") == "unverified" or refute_hides(f):
+    if f.get("confidence") == "unverified" or refute_hides(f) or f.get("exclude") == "duplicate":
         return False
     if f.get("report") == "correctness":
         return f.get("verdict") == "confirmed" and (f.get("exclude") or "") == ""
@@ -36,6 +36,8 @@ def apply(findings: List[dict]) -> Dict[str, Dict[str, int]]:
         if bucket is not None:
             bucket["total"] += 1
             bucket["shown"] += 1 if f["shown"] else 0
+            if f.get("exclude") == "duplicate":
+                bucket["duplicates"] = bucket.get("duplicates", 0) + 1
     return counts
 
 
@@ -58,7 +60,9 @@ def _run_filter(run: Path, n: int) -> dict:
     runmod.load(run)
     items = findingsmod.load_all(run)
     counts = apply(items)
-    problems = [f"{f.get('id')}: {p}" for f in items for p in findingsmod.validate(f)]
+    by_id = {f.get("id"): f for f in items}
+    problems = [f"{f.get('id')}: {p}" for f in items
+                for p in findingsmod.validate(f) or findingsmod.duplicate_problems(f, by_id)]
     if problems:
         raise findingsmod.FindingError(problems)
     for f in items:

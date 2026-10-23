@@ -21,7 +21,7 @@ ENUMS: Dict[str, tuple] = {
     "severity": ("high", "medium", "low"),
     "confidence": ("execution", "docs", "unverified"),
     "effort": ("S", "M", "L", ""),
-    "exclude": ("refactor", "feature", "tooling", "doubtful", "no-code", ""),
+    "exclude": ("refactor", "feature", "tooling", "doubtful", "no-code", "duplicate", ""),
 }
 CONTRAST_VERDICTS = ("agree", "refute", "unsure", "")
 CONTRAST_SCOPES = ("severity", "finding", "")
@@ -38,7 +38,7 @@ DEFAULTS = {
     "branch": "", "base": "", "sha_test": "", "sha_fix": "", "prod_files": [], "tests": [], "red_reason": "",
     "outputs": {"red": "", "green": "", "suite": ""},
     "contrast": {"model": "", "same_family": False, "verdict": "", "scope": "", "rebutted": False, "rebuttal": ""},
-    "exclude": "", "shown": None, "audience": {"title": "", "what_happens": "", "fix_summary": ""},
+    "exclude": "", "duplicate_of": "", "shown": None, "audience": {"title": "", "what_happens": "", "fix_summary": ""},
 }
 
 
@@ -147,11 +147,55 @@ def validate(f: dict) -> List[str]:
                 if _blank(f.get(name)):
                     problems.append(f"missing required field: {name} (confirmed correctness finding with "
                                     "execution confidence)")
+    problems.extend(_duplicate_shape_problems(f))
     if f.get("report") == "quality":
         for name in ("suggestion", "effort"):
             if _blank(f.get(name)):
                 problems.append(f"missing required field: {name} (quality finding)")
     return problems
+
+
+DUPLICATE_HINT = "set both in one call: `finding set ID exclude=duplicate duplicate_of=<id>`"
+
+
+def _duplicate_shape_problems(f: dict) -> List[str]:
+    """`exclude=duplicate` and `duplicate_of` go together, and a finding is never a duplicate of itself."""
+    target = f.get("duplicate_of") or ""
+    if f.get("exclude") == "duplicate":
+        if _blank(target):
+            return [f"missing required field: duplicate_of (exclude=duplicate); {DUPLICATE_HINT}; it names the "
+                    "finding this one is the same as"]
+        if not isinstance(target, str) or not ID_RE.match(target):
+            return [f"duplicate_of: {target!r} must be a finding id (C-01, Q-01)"]
+        if target == f.get("id"):
+            return [f"duplicate_of: {target} is the finding itself"]
+    elif not _blank(target):
+        return [f"duplicate_of is set but exclude is not duplicate; {DUPLICATE_HINT}"]
+    return []
+
+
+def duplicate_problems(f: dict, others: Dict[str, dict]) -> List[str]:
+    """Problems of a duplicate against the run: its target exists, is in the same report and is not a duplicate."""
+    if f.get("exclude") != "duplicate" or _duplicate_shape_problems(f):
+        return []
+    target = others.get(f.get("duplicate_of"))
+    if target is None:
+        return [f"duplicate_of: no finding {f['duplicate_of']} in the run"]
+    if target.get("report") != f.get("report"):
+        return [f"duplicate_of: {f['duplicate_of']} is in report {target.get('report')!r}, not {f.get('report')!r}"]
+    if target.get("exclude") == "duplicate":
+        return [f"duplicate_of: {f['duplicate_of']} is itself a duplicate of {target.get('duplicate_of')}; point to "
+                f"{target.get('duplicate_of')} instead"]
+    return []
+
+
+def _target_of(run: Path, f: dict) -> Dict[str, dict]:
+    """The finding `f` says it duplicates, read from the run (empty when there is none)."""
+    target = f.get("duplicate_of")
+    if f.get("exclude") != "duplicate" or not isinstance(target, str) or not ID_RE.match(target):
+        return {}
+    path = _path(run, target)
+    return {target: _read(path)} if path.is_file() else {}
 
 
 def _folder(run: Path) -> Path:
@@ -188,32 +232,36 @@ def _next_id(run: Path, prefix: str) -> str:
     return f"{prefix}-{top + 1:02d}"
 
 
-PROSE_KEYS = ("title", "what_happens", "fix_summary", "suggestion", "red_reason", "reason")
+PROSE_KEYS = ("title", "what_happens", "fix_summary", "suggestion", "red_reason", "reason", "notes")
 # Free text nested one level down: masked like the top-level prose.
 NESTED_PROSE = {"contrast": ("note", "rebuttal"), "measurement": ("tool", "value")}
 
 
-def mask_prose(f: dict) -> dict:
-    """`f` with every free-text field masked (secrets, key blocks, URL credentials); structure is untouched."""
+def mask_prose(f: dict, warnings: Optional[List[str]] = None) -> dict:
+    """`f` with every free-text field masked (secrets, key blocks, URL credentials, secret-named values); structure is
+    untouched. 40-char code identifiers are kept; each field where a 40-char token was still masked is appended to
+    `warnings` by its dotted name (never the token)."""
     from . import hygiene  # local: hygiene imports this module
 
-    def mask(node: dict, key: str) -> None:
+    def mask(node: dict, key: str, name: str) -> None:
         if isinstance(node.get(key), str):
-            node[key] = hygiene.mask_text(node[key])
+            if warnings is not None and hygiene.masked_tokens(node[key]) and name not in warnings:
+                warnings.append(name)
+            node[key] = hygiene.mask_text(node[key], prose=True)
 
     for key in PROSE_KEYS:
-        mask(f, key)
+        mask(f, key, key)
     if isinstance(f.get("audience"), dict):
         for sub in list(f["audience"]):
-            mask(f["audience"], sub)
+            mask(f["audience"], sub, f"audience.{sub}")
     for key, subs in NESTED_PROSE.items():
         if isinstance(f.get(key), dict):
             for sub in subs:
-                mask(f[key], sub)
+                mask(f[key], sub, f"{key}.{sub}")
     for key in ("evidence", "tests"):
-        for item in f.get(key) if isinstance(f.get(key), list) else []:
+        for i, item in enumerate(f.get(key) if isinstance(f.get(key), list) else []):
             if isinstance(item, dict):
-                mask(item, "note")
+                mask(item, "note", f"{key}[{i}].note")
     return f
 
 
@@ -227,7 +275,7 @@ def _fill(f: dict) -> dict:
     return out
 
 
-def add(run: Path, f: dict) -> str:
+def add(run: Path, f: dict, warnings: Optional[List[str]] = None) -> str:
     runmod.load(run)
     if not isinstance(f, dict):
         raise FindingError(["finding must be a JSON object"])
@@ -236,10 +284,12 @@ def add(run: Path, f: dict) -> str:
         if _blank(f.get("id")):
             prefix = PREFIX.get(f.get("report"))
             f["id"] = _next_id(run, prefix) if prefix else ""
-        filled = mask_prose(_fill(f))
+        filled = mask_prose(_fill(f), warnings)
         problems = validate(filled)
         if not problems and _path(run, filled["id"]).exists():
             problems.append(f"id: {filled['id']} already exists")
+        if not problems:
+            problems = duplicate_problems(filled, _target_of(run, filled))
         if problems:
             raise FindingError(problems)
         _write(run, filled)
@@ -257,12 +307,12 @@ def load_all(run: Path) -> List[dict]:
     return sorted(items, key=_id_key)
 
 
-def update(run: Path, fid: str, changes: dict) -> dict:
+def update(run: Path, fid: str, changes: dict, warnings: Optional[List[str]] = None) -> dict:
     with runmod.run_lock(run):
-        return _update(run, fid, changes)
+        return _update(run, fid, changes, warnings)
 
 
-def _update(run: Path, fid: str, changes: dict) -> dict:
+def _update(run: Path, fid: str, changes: dict, warnings: Optional[List[str]] = None) -> dict:
     path = _path(run, fid)
     if not ID_RE.match(fid or ""):
         raise FindingError([f"{fid!r} is not a finding id (C-01, Q-01)"])
@@ -279,8 +329,8 @@ def _update(run: Path, fid: str, changes: dict) -> dict:
                 node[part] = {}
             node = node[part]
         node[parts[-1]] = value
-    mask_prose(f)
-    problems = validate(f)
+    mask_prose(f, warnings)
+    problems = validate(f) or duplicate_problems(f, _target_of(run, f))
     if problems:
         raise FindingError(problems)
     _write(run, f)

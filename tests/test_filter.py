@@ -45,6 +45,18 @@ class ApplyTest(unittest.TestCase):
         filtermod.apply(items)
         self.assertEqual([f["shown"] for f in items], [False, True, False, True, True])
 
+    def test_duplicates_hidden_in_both_reports_and_counted(self):
+        dup_q = qfind("Q-02")
+        dup_q.update({"exclude": "duplicate", "duplicate_of": "Q-01"})
+        items = [cfind("C-01"), cfind("C-02", exclude="duplicate", duplicate_of="C-01"), qfind("Q-01"), dup_q]
+        counts = filtermod.apply(items)
+        self.assertEqual([f["shown"] for f in items], [True, False, True, False])
+        self.assertEqual(counts, {"correctness": {"shown": 1, "total": 2, "duplicates": 1},
+                                  "quality": {"shown": 1, "total": 2, "duplicates": 1}})
+
+    def test_no_duplicates_key_when_there_are_none(self):
+        self.assertEqual(filtermod.apply([cfind("C-01")])["correctness"], {"shown": 1, "total": 1})
+
     def _refuted(self, report, **contrast):
         f = cfind("C-01") if report == "correctness" else qfind("Q-01")
         f["contrast"] = {"verdict": "refute", **contrast}
@@ -128,6 +140,24 @@ class CliTest(unittest.TestCase):
         self.assertEqual(manifest["steps"]["filter"], "done")
         shown = {f["id"]: f["shown"] for f in findingsmod.load_all(run)}
         self.assertEqual(shown, {"C-01": True, "C-02": False, "Q-01": True})
+
+    def test_filter_rejects_a_duplicate_whose_target_became_a_duplicate(self):
+        repo, _ = make_git_repo({"a.py": "x\n"})
+        run = new_run(repo)
+        ev = [{"cite": "BACK/a.py", "from": 1, "to": 1, "note": ""}]
+        base = {"report": "correctness", "category": "x", "dimension": "bug", "title": "t", "severity": "low",
+                "confidence": "docs", "source": "t", "what_happens": "w", "evidence": ev, "verdict": "confirmed"}
+        for _ in range(3):
+            findingsmod.add(run, base)
+        findingsmod.update(run, "C-02", {"exclude": "duplicate", "duplicate_of": "C-01"})
+        path = run / "findings" / "C-01.json"
+        hand = json.loads(path.read_text())
+        hand.update({"exclude": "duplicate", "duplicate_of": "C-03"})
+        path.write_text(json.dumps(hand))
+        result = run_cli(["filter", "--run", str(run)])
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("C-02", result.stderr)
+        self.assertIsNone(json.loads((run / "findings" / "C-03.json").read_text())["shown"])
 
     def test_filter_validates_everything_before_writing(self):
         repo, _ = make_git_repo({"a.py": "x\n"})

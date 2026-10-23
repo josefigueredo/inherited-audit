@@ -64,3 +64,6 @@ Set `exclude` when a correctness finding, even if true, does not belong in the o
 | `tooling` | CI, build or local tooling. |
 | `doubtful` | The evidence is not conclusive. |
 | `no-code` | It was closed without a code change. |
+
+`exclude=duplicate` is the one value that also applies to quality findings: the finding repeats another one, named in
+`duplicate_of` (same report). It is merged, not discarded: the reports count it apart.

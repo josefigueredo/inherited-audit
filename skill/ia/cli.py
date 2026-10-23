@@ -113,6 +113,12 @@ def _step(args: argparse.Namespace) -> int:
     return OK
 
 
+def _warn_masked(fid: str, fields: List[str]) -> None:
+    if fields:
+        print(f"warning: {fid}: masked a 40-char token that does not look like a code identifier in "
+              f"{', '.join(fields)}; check the stored text", file=sys.stderr)
+
+
 def _finding(args: argparse.Namespace) -> int:
     run_dir = Path(args.run)
     try:
@@ -125,9 +131,14 @@ def _finding(args: argparse.Namespace) -> int:
                 data = json.loads(raw)
             except ValueError as exc:
                 raise runmod.UsageError(f"{args.file} is not valid JSON: {exc}")
-            print(findingsmod.add(run_dir, data))
+            warnings: List[str] = []
+            fid = findingsmod.add(run_dir, data, warnings)
+            _warn_masked(fid, warnings)
+            print(fid)
         elif args.action == "set":
-            findingsmod.update(run_dir, args.id, findingsmod.parse_pairs(args.pairs))
+            warnings = []
+            findingsmod.update(run_dir, args.id, findingsmod.parse_pairs(args.pairs), warnings)
+            _warn_masked(args.id, warnings)
             print(args.id)
         else:
             runmod.load(run_dir)

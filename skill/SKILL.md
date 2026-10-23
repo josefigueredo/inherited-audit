@@ -353,7 +353,7 @@ python3 <skill-dir>/ia.py finding set --run <run-dir> C-07 verdict=confirmed con
 ### `filter`
 
 - Read: the "Filter" section of `references/checklist.md`.
-- Mark exclusions first (`ia.py finding set --run <run-dir> C-12 exclude=refactor`), then run
+- Mark exclusions first (`ia.py finding set --run <run-dir> C-12 exclude=refactor`; a repeat: `exclude=duplicate duplicate_of=C-07`), then run
   `python3 <skill-dir>/ia.py filter --run <run-dir>` (`-n` sets how many quality findings go in "Start here", default
   5). It sets `shown` on every finding and prints the shown and total counts; tell the person both.
 - Closes: `ia.py filter` marks `filter` done.

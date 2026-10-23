@@ -70,6 +70,7 @@ LABELS: Dict[str, Dict[str, str]] = {
                         "vale menos y se dice.",
         "how_waivers": "Se cerró el paso con módulos sin revisar, y este fue el motivo:",
         "how_not_applicable": "Revisiones que no aplican a un módulo, y por qué:",
+        "how_duplicates": "duplicados fusionados con otro hallazgo: {n}",
         "how_counts": "Lo que pasó el filtro:", "report_correctness": "Corrección", "report_quality": "Calidad",
         "in_history": "en el historial (commit {commit})",
         "no_file": "No se pudo leer {path} en {sha}.",
@@ -123,6 +124,7 @@ LABELS: Dict[str, Dict[str, str]] = {
                         "contrast is weaker, and that is stated.",
         "how_waivers": "A step was closed with modules not reviewed, and this is why:",
         "how_not_applicable": "Reviews that do not apply to a module, and why:",
+        "how_duplicates": "duplicates merged into another finding: {n}",
         "how_counts": "What passed the filter:", "report_correctness": "Correctness", "report_quality": "Quality",
         "in_history": "in history (commit {commit})",
         "no_file": "Could not read {path} at {sha}.",
@@ -194,7 +196,7 @@ SENSITIVE_DIMENSIONS = ("security", "supply-chain")
 def _safe(f: dict, text: object) -> str:
     """Free text of a finding; for security and supply-chain findings every line goes through hygiene masking."""
     text = "" if text is None else str(text)
-    return hygienemod.mask_text(text) if f.get("dimension") in SENSITIVE_DIMENSIONS else text
+    return hygienemod.mask_text(text, prose=True) if f.get("dimension") in SENSITIVE_DIMENSIONS else text
 
 
 def _prose(f: dict, key: str) -> str:
@@ -205,20 +207,24 @@ def _prose(f: dict, key: str) -> str:
 # --- git ------------------------------------------------------------------------------------------------------------
 
 def snippet(repo: dict, path: str, start: int, end: int, context: int = 3) -> str:
-    """The cited lines plus `context` lines around them, read at the repo's pinned sha, as an escaped <pre> block."""
+    """The cited lines plus `context` lines around them, read at the repo's pinned sha, as an escaped <pre> block.
+    Every line is masked, context included; a config file's block (`<pre data-config>`) also masks bare
+    `key: value` assignments behind secret names, which `ia.py hygiene` checks the same way."""
     text = citesmod.blob_text(repo, path)
     if text is None:
         return ""
     lines = text.splitlines()
     # Mask the whole blob before slicing: a window that starts inside a private key still knows BEGIN is above it.
-    keys = hygienemod.KeyMasker()
+    config = hygienemod.is_config_path(path)
+    keys = hygienemod.KeyMasker(config=config)
     masked = [keys.line(raw) for raw in lines]
     first, last = max(1, start - context), min(len(lines), end + context)
     rows = []
     for n in range(first, last + 1):
         cls = "ln hl" if start <= n <= end else "ln"
         rows.append(f'<span class="{cls}"><i>{n}</i>{esc(masked[n - 1])}</span>')
-    return "<pre>" + "".join(rows) + "</pre>" if rows and start <= end <= len(lines) else ""
+    pre = "<pre data-config>" if config else "<pre>"
+    return pre + "".join(rows) + "</pre>" if rows and start <= end <= len(lines) else ""
 
 
 def _badge(severity: str, L: Dict[str, str]) -> str:
@@ -294,9 +300,9 @@ def _rebuttal(f: dict, L: Dict[str, str]) -> str:
         note, answer = "", note
     out = ""
     if note:
-        out += f'<p class="nota"><b>{esc(L["contrast_note"])}:</b> {esc(hygienemod.mask_text(note))}</p>'
+        out += f'<p class="nota"><b>{esc(L["contrast_note"])}:</b> {esc(hygienemod.mask_text(note, prose=True))}</p>'
     if answer:
-        out += f'<p class="nota"><b>{esc(L["rebuttal"])}:</b> {esc(hygienemod.mask_text(answer))}</p>'
+        out += f'<p class="nota"><b>{esc(L["rebuttal"])}:</b> {esc(hygienemod.mask_text(answer, prose=True))}</p>'
     return out
 
 
@@ -454,7 +460,9 @@ def _how(manifest: dict, report: str, everything: List[dict], L: Dict[str, str])
         items = "".join(f'<li>{esc(open_cell_label(f"{m} / {p}", lang))}: {esc(note)}</li>' for m, p, note in skipped)
         parts.append(f"<p>{esc(L['how_not_applicable'])}</p><ul>{items}</ul>")
     counts = manifest["filter"].get("counts") or {}
-    items = "".join(f'<li>{esc(L["report_" + r])}: {esc(L["shown_of"].format(shown=c["shown"], total=c["total"]))}</li>'
+    items = "".join(f'<li>{esc(L["report_" + r])}: {esc(L["shown_of"].format(shown=c["shown"], total=c["total"]))}'
+                    + (f' · {esc(L["how_duplicates"].format(n=c["duplicates"]))}' if c.get("duplicates") else "")
+                    + "</li>"
                     for r, c in ((r, counts.get(r)) for r in findingsmod.REPORTS)
                     if isinstance(c, dict) and "shown" in c and "total" in c)
     if items:

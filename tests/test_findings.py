@@ -81,6 +81,76 @@ class MaskOnWriteTest(unittest.TestCase):
         findings.update(run, fid, {"what_happens": f"x {AWS}", "contrast.note": AWS, "suggestion": AWS})
         self.assertNotIn(AWS, self.raw(run))
 
+    def test_prose_keeps_40_char_code_identifiers_and_masks_random_tokens(self):
+        run = make_run()
+        ident, rnd = "provideObservabilityConfigurationService", "q8ZtR2vXk9LmP4wNs7YbH3jDf6GcA1eUo5TiK0rB"
+        warnings = []
+        fid = findings.add(run, quality(suggestion=f"Rename the bean to {ident}.", title=f"T {rnd}"),
+                           warnings=warnings)
+        stored = findings.load_all(run)[0]
+        self.assertEqual(stored["suggestion"], f"Rename the bean to {ident}.")
+        self.assertNotIn(rnd, self.raw(run))
+        self.assertEqual(warnings, ["title"])
+        warnings = []
+        findings.update(run, fid, {"audience.fix_summary": f"Use {ident}", "notes": f"See {ident}"},
+                        warnings=warnings)
+        self.assertEqual(self.raw(run).count(ident), 3)
+        self.assertEqual(warnings, [])
+        findings.update(run, fid, {"audience.what_happens": f"y {rnd}"}, warnings=warnings)
+        self.assertEqual(warnings, ["audience.what_happens"])
+
+    def test_cli_set_warns_on_masked_token_naming_the_field_only(self):
+        run = make_run()
+        findings.add(run, candidate())
+        rnd = "q8ZtR2vXk9LmP4wNs7YbH3jDf6GcA1eUo5TiK0rB"
+        r = run_cli(["finding", "set", "--run", str(run), "C-01", f"fix_summary=use {rnd}"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("fix_summary", r.stderr)
+        self.assertNotIn(rnd, r.stderr + r.stdout)
+        r = run_cli(["finding", "set", "--run", str(run), "C-01",
+                     "fix_summary=rename provideObservabilityConfigurationService"])
+        self.assertEqual((r.returncode, r.stderr), (0, ""))
+
+
+class DuplicateTests(unittest.TestCase):
+    def test_duplicate_needs_duplicate_of_and_the_other_way_round(self):
+        problems = findings.validate(candidate(id="C-02", exclude="duplicate"))
+        self.assertTrue(any("duplicate_of" in p and "same" in p for p in problems), problems)
+        problems = findings.validate(candidate(id="C-02", duplicate_of="C-01"))
+        self.assertTrue(any("exclude=duplicate" in p for p in problems), problems)
+        self.assertTrue(findings.validate(candidate(id="C-02", exclude="duplicate", duplicate_of="C-02")))
+        self.assertTrue(findings.validate(candidate(id="C-02", exclude="duplicate", duplicate_of="nope")))
+        self.assertEqual(findings.validate(candidate(id="C-02", exclude="duplicate", duplicate_of="C-01")), [])
+
+    def test_old_finding_without_duplicate_of_still_validates(self):
+        self.assertEqual(findings.validate(candidate(id="C-01")), [])
+        self.assertEqual(findings._fill({})["duplicate_of"], "")
+
+    def test_set_checks_the_target_exists_in_the_same_report_and_is_not_a_duplicate(self):
+        run = make_run()
+        findings.add(run, candidate())
+        findings.add(run, candidate())
+        findings.add(run, quality())
+        findings.add(run, candidate())
+        for target, word in (("C-09", "no finding"), ("Q-01", "report")):
+            with self.assertRaises(findings.FindingError) as ctx:
+                findings.update(run, "C-02", {"exclude": "duplicate", "duplicate_of": target})
+            self.assertIn(word, str(ctx.exception))
+        findings.update(run, "C-02", {"exclude": "duplicate", "duplicate_of": "C-01"})
+        with self.assertRaises(findings.FindingError) as ctx:
+            findings.update(run, "C-03", {"exclude": "duplicate", "duplicate_of": "C-02"})
+        self.assertIn("C-01", str(ctx.exception))
+        stored = findings.load_all(run)[1]
+        self.assertEqual((stored["exclude"], stored["duplicate_of"], stored["verdict"]),
+                         ("duplicate", "C-01", "candidate"))
+
+    def test_add_checks_the_target_too(self):
+        run = make_run()
+        with self.assertRaises(findings.FindingError):
+            findings.add(run, candidate(exclude="duplicate", duplicate_of="C-07"))
+        findings.add(run, candidate())
+        self.assertEqual(findings.add(run, candidate(exclude="duplicate", duplicate_of="C-01")), "C-02")
+
 
 class ValidateTests(unittest.TestCase):
     def test_valid_minimal_correctness_candidate_passes(self):
