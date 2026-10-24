@@ -406,11 +406,10 @@ def start(run: Path, target: str, base_ref: Optional[str] = None, timeout: int =
         raise RunError(f"{repo['alias']} has no test_cmd in its plan; set one with `ia.py baseline --set`")
     runmod._check_clean(repo["alias"], repo_path)
     tip = _check_branch(repo_path, branch, base_ref)
-    pr = None
+    pr = gh_pr(repo, branch)  # read-only; with --base-ref only for the PR's real base, shown to the person
     if base_ref:
         base = base_ref
     else:
-        pr = gh_pr(repo, branch)
         if not pr or not pr.get("baseRefName"):
             raise RunError(f"no PR found for {branch} with gh (read-only `gh pr list`); the base it merges into is "
                            "unknown. Check gh auth, or pass --base-ref <ref>")
@@ -433,12 +432,16 @@ def start(run: Path, target: str, base_ref: Optional[str] = None, timeout: int =
     except RunError:
         old = {}
     state = {"branch": branch, "alias": repo["alias"], "base": base, "pr": (pr or {}).get("number") or old.get("pr"),
+             "pr_base": (pr or {}).get("baseRefName") or old.get("pr_base") or "", "base_ref": base_ref or "",
              "tip": old.get("tip") or tip, "last": old.get("last") or tip, "done": old.get("done") or {},
              "members": [f["id"] for f in unit["members"]]}
     folder = _dir(run, branch)
     folder.mkdir(parents=True, exist_ok=True)
     for f in unit["members"]:
         (folder / f"{f['id']}.md").write_text(_context(f, repo, plan_, branch, base), encoding="utf-8")
+    if pr:
+        lines.append(f"PR #{pr['number']} merges into {pr.get('baseRefName') or '?'}"
+                     + (f"; --base-ref: merging the local ref {base_ref} instead" if base_ref else ""))
     lines.append(f"proving on a throwaway merge of {base} into {branch} ({tip[:10]}); suite: "
                  f"{' '.join(plan_['test_cmd'])}")
     result = run_suite(repo, plan_, state["last"], base, timeout)
@@ -548,7 +551,7 @@ def check(run: Path, fid: str, allow_many: bool = False, timeout: int = 3600) ->
             problems.append(f"existing test file changed: {path} (only new tests may be added)")
         elif path not in frozen:
             problems.append(f"out of scope: {path} (not in prod_files; name it with its reason in fix.extra_files)")
-    problems += _message_problems(wt, last, commits)
+    problems += _message_problems(wt, last, commits, (str(run),))
     if commits:
         problems += [p for p in hygienemod.check_branch(wt, last, state["branch"])
                      if hygienemod.R_ATTRIBUTION not in p]  # attribution is in _message_problems, once
@@ -588,6 +591,11 @@ def check(run: Path, fid: str, allow_many: bool = False, timeout: int = 3600) ->
     return not problems, lines
 
 
+def _model_id(name: str) -> str:
+    """`gpt-6-luna (codex exec read-only)` -> `gpt-6-luna`: the model id without the notes after it."""
+    return re.split(r"[\s(]", name.strip().lower(), maxsplit=1)[0] if name.strip() else ""
+
+
 def _finding(run: Path, fid: str) -> dict:
     path = Path(run) / "findings" / f"{fid}.json"
     if not findingsmod.ID_RE.match(fid or "") or not path.is_file():
@@ -595,7 +603,7 @@ def _finding(run: Path, fid: str) -> dict:
     return findingsmod._read(path)
 
 
-def _message_problems(wt: Path, last: str, commits: List[str]) -> List[str]:
+def _message_problems(wt: Path, last: str, commits: List[str], extra: Tuple[str, ...] = ()) -> List[str]:
     out = []
     for sha in commits:
         subject = _git(wt, "log", "-1", "--format=%s", sha)
@@ -607,6 +615,10 @@ def _message_problems(wt: Path, last: str, commits: List[str]) -> List[str]:
         m = CLOSING.search(body)
         if m:
             out.append(f"commit {sha[:10]}: closing keyword {m.group(0)!r}: closing belongs to the PR body")
+        hit = hygienemod.local_path_hit(body, extra)
+        if hit:
+            out.append(f"commit {sha[:10]}: local path in the message ({hit}): it becomes public with the push; "
+                       "quote commands relative to the repo root (./gradlew test --tests ...)")
     if commits:
         out += hygienemod._attribution_in_commits(wt, last, "HEAD")
     return out
@@ -688,6 +700,11 @@ def done(run: Path, fid: str) -> List[str]:
         state.setdefault("done", {})[fid] = head
         _save_state(run, state)
         lines.append(f"{fid}: done (sha_fix {head[:10]}, suite {chk.get('suite')})")
+        contrast = (f.get("contrast") or {}).get("model") or ""
+        if contrast and _model_id(contrast) == _model_id(review.get("model") or ""):
+            lines.append(f"warning: {fid}: the reviewer ({review.get('model')}) is the model that already judged this "
+                         f"finding in the audit's contrast ({contrast}); prefer one that has not, and say so to the "
+                         "person")
     elif status in ("blocked", "declined"):
         if wt.is_dir():
             head = _git(wt, "rev-parse", "HEAD")
@@ -713,6 +730,15 @@ def done(run: Path, fid: str) -> List[str]:
 
 
 # --- publish ----------------------------------------------------------------------------------------------------
+
+def _pr_base(state: dict) -> str:
+    """The base the PR merges into, as gh reported it; never the --base-ref test ref."""
+    if state.get("pr_base"):
+        return state["pr_base"]
+    if state.get("base_ref"):
+        return "unknown (gh found no PR)"
+    return str(state.get("base") or "").replace("origin/", "", 1)
+
 
 def _note(fixed: List[str], moot: List[str], pending: List[str], suite: str, base: str) -> str:
     if not pending:
@@ -779,13 +805,15 @@ def publish(run: Path, partial: bool = False) -> Tuple[Path, List[str]]:
             continue
         path = q(repo["path"])
         suite = (_fix(fixed[-1]).get("check") or {}).get("suite") or "not measured"
-        note = _note([f["id"] for f in fixed], moot, pending, suite, state["base"].replace("origin/", "", 1))
+        note = _note([f["id"] for f in fixed], moot, pending, suite, _pr_base(state))
         closes = " ".join(f["id"] for f in fixed) + ("" if pending else " " + " ".join(moot))
         body = out / f"{_slug(branch)}.body.md"
         cmds += [publishmod._comment(f"{branch} ({repo['alias']}): fixed {', '.join(f['id'] for f in fixed)}"
                                      + (f"; moot {', '.join(moot)}" if moot else "")
                                      + (f"; still red {', '.join(pending)}" if pending else "")
-                                     + f"; PR base {state['base'].replace('origin/', '', 1)}"),
+                                     + f"; PR base {_pr_base(state)}"
+                                     + (f" (tested against local ref {state['base_ref']})"
+                                        if state.get("base_ref") else "")),
                  f"git -C {path} fetch origin {q(branch)}",
                  f"git -C {path} merge-base --is-ancestor origin/{q(branch)} {q(branch)} || "
                  f"{{ echo {q(f'{branch}: the remote has commits the local branch lacks; stop')} >&2; exit 1; }}",

@@ -10,6 +10,12 @@ You get only this, and judge from it plus the repository at the fix commit:
 - `git diff <red-test commit>..<fix commit>` (for a group member, from the previous member's fix);
 - `outputs/<id>-green.txt` and `outputs/<id>-fix-suite.txt`, plus the suite line from `fix.check`.
 
+## Who reviews
+
+Not the fixer. Use a model that has not judged this finding before: the audit's `contrast.model`, and the model that
+verified it, already formed a view of the same code. Use another model of the same family, or another family. When the
+host has no other model, say so to the person; `fix done` warns when the reviewer matches `contrast.model`.
+
 ## The three claims
 
 State each one as `CONFIDENT`, `NOT_CONFIDENT` or `UNSURE`, with evidence: the file and lines of the diff, a caller
@@ -49,4 +55,6 @@ Return JSON only:
             "minimal": {"state": "CONFIDENT", "evidence": "..."}}}
 ```
 
-The orchestrator records it with `python3 <ia> finding set --run <run> <id> 'fix.review=<that JSON>'`.
+Your own `model` value is not trusted. The orchestrator replaces it with the model the CLI reports: for Codex, the
+`model:` line of the log header. The orchestrator records it with
+`python3 <ia> finding set --run <run> <id> 'fix.review=<that JSON>'`.

@@ -42,7 +42,8 @@ class SkillSpecTest(unittest.TestCase):
                 for b in sub._actions:
                     options.update(b.option_strings)
         self.assertEqual(actions, {"plan", "start", "check", "done", "publish"})
-        for flag in set(re.findall(r"(--[a-z][a-z-]+)", FIX_MD)) - {"--amend"}:  # git commit --amend, in fix.md
+        quoted = {"--amend", "--tests"}  # git and gradle flags quoted in fix.md
+        for flag in set(re.findall(r"(--[a-z][a-z-]+)", FIX_MD)) - quoted:
             self.assertIn(flag, options, f"fix-skill mentions {flag}, which `ia.py fix` does not have")
         for action in re.findall(r"`fix (\w+)", FIX_MD):
             self.assertIn(action, actions)

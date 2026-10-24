@@ -33,6 +33,10 @@ test that inherited-audit published. Another agent reviews your diff afterwards;
    Ran: <the targeted command> -> <n of n pass>
    ```
 
+   Quote every command relative to the repo root, as a reader of the PR would run it (`./gradlew test --tests
+   '...ApiTokenValidationServiceTest'`), never through the run's helper scripts or any absolute path of this machine
+   (`/Users/...`, `/private/...`, `/tmp/...`, the run dir). The message is public once pushed; `fix check` fails on one.
+
    No issue reference and no closing keyword: the PR body closes the issue. No attribution of any kind.
 6. Hand back the commit sha, the files changed, the green line, and whether you deviated from the proposal.
 

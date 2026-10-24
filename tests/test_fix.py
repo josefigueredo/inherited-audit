@@ -362,6 +362,26 @@ class CheckTest(unittest.TestCase):
         self.assertFalse(passed)
         self.assertIn("by counts: 1 failing now, expected at most 0", "\n".join(lines))
 
+    def test_check_fails_on_a_local_path_in_the_commit_message(self):
+        fx = Fixture()
+        fx.start()
+        fx.fix(message="fix(calc): add returns the sum\n\nRan: sh /private/tmp/x/run/docker/run.sh BACK test")
+        self.assertFails(fx, "local path in the message (/private/tmp/x/run/docker/run.sh)")
+
+    def test_check_accepts_commands_quoted_from_the_repo_root(self):
+        fx = Fixture()
+        fx.start()
+        fx.fix(message="fix(calc): add returns the sum\n\nRan: ./gradlew test --tests 'CalcTest' -> 1 of 1 pass")
+        passed, lines = fx.check()
+        self.assertTrue(passed, lines)
+
+    def test_local_path_pattern(self):
+        for text in ("/Users/me/x", "at /home/u/run.sh", "(/var/folders/7j/T/x)", "C:\\Users\\me", "/tmp/a"):
+            self.assertTrue(hygienemod.local_path_hit(text), text)
+        for text in ("./gradlew test", "src/main/kotlin/A.kt", "https://example.com/tmp/x", "~/notes"):
+            self.assertEqual(hygienemod.local_path_hit(text), "", text)
+        self.assertEqual(hygienemod.local_path_hit("ran in /opt/run/x", ("/opt/run",)), "/opt/run")
+
     def test_closing_keyword_pattern(self):
         for text in ("Closes #12", "fixes #3", "Resolved: #4", "closes o/r#5"):
             self.assertRegex(text, fixmod.CLOSING)
@@ -395,6 +415,19 @@ class DoneTest(unittest.TestCase):
         self.assertEqual(f["outputs"]["green"], "outputs/C-01-green.txt")
         self.assertEqual(f["outputs"]["suite"], "outputs/C-01-fix-suite.txt")
         self.assertFalse(fx.wt().exists())
+
+    def test_done_warns_when_the_reviewer_is_the_contrast_model(self):
+        fx = Fixture()
+        findingsmod.update(fx.run, "C-01", {"contrast.model": "gpt-6-luna", "contrast.verdict": "agree"})
+        fx.start()
+        sha = fx.fix()
+        self.assertTrue(fx.check()[0])
+        fx.review("C-01", sha)
+        findingsmod.update(fx.run, "C-01", {"fix.review.model": "gpt-6-luna (codex exec read-only)"})
+        lines = "\n".join(fixmod.done(fx.run, "C-01"))
+        self.assertIn("C-01: done", lines)
+        self.assertIn("warning: C-01: the reviewer (gpt-6-luna (codex exec read-only)) is the model that already "
+                      "judged this finding", lines)
 
     def test_review_claims_are_validated(self):
         fx = Fixture()
@@ -467,6 +500,23 @@ class PublishTest(unittest.TestCase):
                 self.assertLessEqual(len(shlex.split(line.split("--title", 1)[1])[0]), 100)
         self.assertEqual(subprocess.run(["sh", "-n", str(out)]).returncode, 0)
         self.assertEqual(lines, ["fix/c-01-calc: ready (C-01)"])
+
+    def test_publish_names_the_real_pr_base_when_a_local_ref_was_tested(self):
+        fx = Fixture()
+        fx.start(base_ref="origin/main")
+        sha = fx.fix()
+        self.assertTrue(fx.check()[0])
+        fx.review("C-01", sha)
+        fixmod.done(fx.run, "C-01")
+        cmds = fixmod.publish(fx.run)[0].read_text(encoding="utf-8")
+        self.assertIn("; PR base main (tested against local ref origin/main)", cmds)
+        self.assertNotIn("PR base origin/main", cmds)
+
+    def test_hygiene_flags_a_local_path_in_a_fix_body(self):
+        fx = Fixture()
+        (fx.run / "fix").mkdir()
+        (fx.run / "fix" / "fix-c-01-calc.body.md").write_text("Ran /Users/me/run.sh\n", encoding="utf-8")
+        self.assertIn("fix/fix-c-01-calc.body.md: local path: /Users/me/run.sh", hygienemod.check_fix(fx.run))
 
     def test_publish_commands_run_as_prepared_with_a_fake_gh(self):
         fx = Fixture()

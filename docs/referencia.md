@@ -55,7 +55,7 @@ CLI:
 |---|---|
 | `ia.py fix plan` | Lista las ramas de PR para arreglar, con el número de PR y su base (con `gh` de solo lectura) y los hallazgos de cada una. Un PR de grupo (`audit/pr-N`) se arregla entero, en orden, en un solo worktree |
 | `ia.py fix start` | Crea el worktree en la rama del PR y el contexto de cada hallazgo. Corre la suite sobre un merge descartable de la base del PR y guarda los tests que pasan, por nombre (por conteo si no hay junit, y lo dice). Un hallazgo que ya pasa ahí queda `moot`. Necesita `fix.authorized_by` en el manifest |
-| `ia.py fix check` | Revisa los commits del arreglo: el test rojo intacto, el alcance (`prod_files`, `fix.extra_files`, tests nuevos), conventional commits de 100 caracteres o menos, sin palabra de cierre ni atribución, e higiene. Corre la suite sobre el merge y la compara con la del inicio |
+| `ia.py fix check` | Revisa los commits del arreglo: el test rojo intacto, el alcance (`prod_files`, `fix.extra_files`, tests nuevos), conventional commits de 100 caracteres o menos, sin palabra de cierre, atribución ni rutas locales, e higiene. Corre la suite sobre el merge y la compara con la del inicio |
 | `ia.py fix done` | Registra el arreglo solo con el chequeo y una revisión de otro agente con tres afirmaciones CONFIDENT sobre el mismo commit. Un `blocked` o `declined` vuelve atrás la rama local |
 | `ia.py fix publish` | Escribe `fix/commands.sh`: push sin forzar, el PR resuelto al correr, el cuerpo actual reescrito (nota de borrador → nota de arreglo, `Refs` → `Closes`), el título del commit de arreglo y `gh pr ready`. Con `--partial`, un grupo incompleto sube lo arreglado y sigue en borrador. Nunca lo corre |
 

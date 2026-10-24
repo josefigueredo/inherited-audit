@@ -302,6 +302,23 @@ def attribution_hit(text: str) -> str:
     return text[start:end if end != -1 else len(text)].strip()[:EXCERPT]
 
 
+# Absolute paths of the machine that ran the fix: in a commit message or a PR body they leak a home folder or a scratch
+# directory the moment it is pushed.
+LOCAL_PATH = re.compile(r"(?<![\w.~-])(?:/Users/|/home/|/private/|/tmp/|/var/folders/|[A-Za-z]:\\(?=[\w.-]))"
+                        r"[^\s'\"`)]*")
+
+
+def local_path_hit(text: str, extra: Sequence[str] = ()) -> str:
+    """The first absolute local path in `text` (or one of the `extra` directories, such as the run dir), cut; ""."""
+    m = LOCAL_PATH.search(text)
+    if m:
+        return m.group(0)[:EXCERPT]
+    for path in extra:
+        if path and path in text:
+            return path[:EXCERPT]
+    return ""
+
+
 def attribution_identity(name: str, email: str) -> bool:
     return bool(TOOL_NAME.match(name.strip()) or TOOL_EMAIL.search(email.strip()))
 
@@ -528,8 +545,17 @@ def check_publish(run: Path) -> List[str]:
 
 def check_fix(run: Path) -> List[str]:
     """`<run>/fix/*` (inherited-fix's context, bodies and commands), never the `fix/wt-*` worktrees: those hold the
-    audited repo's own source."""
-    return _check_prepared(run, "fix", skip="wt-")
+    audited repo's own source. PR bodies (`*.body.md`) carry no absolute local path either."""
+    out = _check_prepared(run, "fix", skip="wt-")
+    root = Path(run) / "fix"
+    for path in sorted(root.glob("*.body.md")) if root.is_dir() else []:
+        try:
+            hit = local_path_hit(path.read_text(encoding="utf-8"), (str(Path(run).resolve()),))
+        except (OSError, UnicodeDecodeError):
+            continue
+        if hit:
+            out.append(f"{path.relative_to(Path(run)).as_posix()}: local path: {hit}")
+    return out
 
 
 def _changed_lines(before: str, after: str) -> int:

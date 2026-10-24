@@ -50,13 +50,17 @@ answer with `python3 <ia> set --run <run-dir> fix.authorized_by='<who and how>'`
    - `conflict`: the branch no longer merges with the moved base. Stop and let the person decide: rebase the red
      branch first, or fix on the old base and leave the conflict to the PR.
    - `by counts`: the plan has no junit reports, so "no new failures" is only a count. Say so in your report.
+   - `--base-ref <ref>` is only a test aid for a sandbox clone without a remote: it merges that local ref. Everything
+     shown to the person still names the PR's real base from gh.
 3. **Fix**, one subagent per PR branch, working only in `<run>/fix/wt-<branch>`. Give it
    `references/passes/fix.md`, the context file `fix start` wrote, and the finding id. For a group, go member by
    member: fix, then `fix check`, then review, then `fix done`, then the next member.
 4. **Check.** Run `fix check <id>`. Exit 1 lists every problem: send them back to the fixer. Never edit the record to
    get past a check.
-5. **Review**, with a different agent from the fixer and another model family when the host has one (the Codex or
-   cursor-agent read-only recipes in the inherited-audit `references/workers.md`). Give it
+5. **Review**, with a different agent from the fixer, and a model that has not judged this finding before (not the
+   finding's `contrast.model`). Prefer another model family when the host has one, through the Codex or cursor-agent
+   read-only recipes in the inherited-audit `references/workers.md`. Record as `model` the one the CLI reports in its
+   log header, never the model's own claim. Give it
    `references/passes/fix-review.md`. It answers three claims, each with evidence: `targeted`, `no_new_risk` and
    `minimal`. Record what it returns:
    `python3 <ia> finding set --run <run-dir> C-24 'fix.review={"model":"...","sha":"<HEAD>","claims":{...}}'`.
