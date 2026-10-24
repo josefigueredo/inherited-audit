@@ -126,7 +126,9 @@ pass before closing.
 - The same secret-named check (without the bare `key: value` rule, which is only for config files) runs on saved
   outputs, finding files and publish files. `ia.py hygiene --run <run-dir> --fix` masks them in place first (text
   files under `outputs/` and `publish/`, and finding prose) and prints each file it changed, never a value. It never
-  touches branches, reports or binary files: amend the branch, render again, and decide on a binary by hand.
+  touches branches, reports, binary files or files something runs (config, scripts, Dockerfiles, such as the e2e
+  infra): amend the branch, render again, move a literal in a runnable file to an environment variable, and decide
+  on a binary by hand.
 
 ## Branches
 

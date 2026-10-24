@@ -46,6 +46,10 @@ NOT_SECRET_TAIL = {"ttl", "expiration", "expiry", "expires", "length", "size", "
                    "min", "store", "id", "mode", "env", "var", "field", "param", "required", "regex", "pattern", "attribute",
                    "attr", "claim", "label", "column", "property"}
 CONFIG_SUFFIXES = (".yml", ".yaml", ".properties", ".env", ".conf", ".cfg", ".ini", ".toml")
+# Saved files that something runs (the e2e infra under outputs/): masking a literal there breaks them, so --fix leaves
+# them for a person, who moves the value to an environment variable.
+RUNNABLE_SUFFIXES = (".sh", ".bash", ".zsh", ".ps1", ".py", ".js", ".mjs", ".cjs", ".ts", ".rb", ".sql")
+RUNNABLE_NAMES = ("dockerfile", "makefile", "containerfile")
 _NAME = r"[A-Za-z_][A-Za-z0-9_.-]*"
 PLACEHOLDER = re.compile(r"\$\{(" + _NAME + r")(:-?)([^}]*)\}")
 # QUOTED and BARE are lookaheads, so candidates overlap: in `env: DB_PASSWORD=x` or `{"a": "b {"api_key": "x"}"}`
@@ -55,7 +59,7 @@ HEADER = re.compile(r"""(?i)(?:-H|--header)\s*["']\s*(""" + _NAME + r""")\s*:\s*
 BEARER = re.compile(r"(?i)\bauthorization\s*:\s*(?:bearer|basic)\s+([^\s\"'<>$]+)")
 BARE = re.compile(r"""(?<![\w.${-])(?=(""" + _NAME + r""")\s*([:=])[ \t]*(?!["'])([^\s#;,"'}]+))""")
 SCREAMING = re.compile(r"[A-Z][A-Z0-9_]*$")
-NOT_SECRET_VALUE = re.compile(r"(?i)(\*{4}|[$<{%].*|\d+(\.\d+)?[a-z]{0,2}|true|false|null|none|nil|~|"
+NOT_SECRET_VALUE = re.compile(r"(?i)(\*+|[$<{%].*|\d+(\.\d+)?[a-z]{0,2}|true|false|null|none|nil|~|"
                               r"[a-z][a-z0-9+.-]*://.*)$")
 ROW = re.compile(r'<span class="ln[^"]*"><i>\d+</i>(.*?)</span>')
 PRE = re.compile(r"<pre( data-config)?>(.*?)</pre>")
@@ -452,10 +456,19 @@ def _changed_lines(before: str, after: str) -> int:
     return sum(1 for a, b in zip(before.split("\n"), after.split("\n")) if a != b)
 
 
+def _runnable(path: Path) -> bool:
+    name = path.name.lower()
+    return (is_config_path(name) or name.endswith(RUNNABLE_SUFFIXES) or name in RUNNABLE_NAMES
+            or name.startswith(RUNNABLE_NAMES))
+
+
 def _fix_file(path: Path) -> int:
     """Rewrite one saved text file with what the checks flag masked (secrets, URL credentials, key blocks,
     secret-named values; 40-char tokens such as lockfile hashes and test names stay); the number of lines changed.
-    Files that are not UTF-8 text are left alone."""
+    Files that are not UTF-8 text, and config files, scripts and Dockerfiles (something runs them), are left alone:
+    the checks still report them."""
+    if _runnable(path):
+        return 0
     try:
         text = path.read_bytes().decode("utf-8")
     except (OSError, UnicodeDecodeError):
@@ -470,7 +483,8 @@ def _fix_file(path: Path) -> int:
 def fix_run(run: Path) -> List[Tuple[str, int]]:
     """Mask what the audit saved: every finding whose prose is not masked is written again (`finding set` masks on
     write) and every text file under `outputs/` and `publish/` is rewritten masked. (relative path, lines changed)
-    for each file that changed, sorted; branches and reports are never touched (amend the branch, render again)."""
+    for each file that changed, sorted; branches, reports, binaries and runnable files (config, scripts,
+    Dockerfiles) are never touched."""
     run = Path(run)
     fixed: List[Tuple[str, int]] = []
     for f in findingsmod.load_all(run):
