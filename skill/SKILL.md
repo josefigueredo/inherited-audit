@@ -370,7 +370,7 @@ python3 <skill-dir>/ia.py finding set --run <run-dir> C-07 verdict=confirmed con
 
 - Read: the "Hygiene" section of `references/checklist.md`.
 - Run `python3 <skill-dir>/ia.py hygiene --run <run-dir>`: secrets and 40-character ids in branches and saved
-  outputs, unmasked secrets in rendered reports, local tool files in commits, a committable run dir. Fix every problem (amend the branch, mask the output)
+  outputs, unmasked secrets in rendered reports, local tool files in commits, a committable run dir. Fix every problem (amend the branch; `--fix` masks outputs, publish files and prose)
   and run it again until it is clean. Check action SHAs against their comments by looking them up
   (`references/verification-rules.md`, rule 7).
 - Closes: `ia.py step --run <run-dir> hygiene done`.

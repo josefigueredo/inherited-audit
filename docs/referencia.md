@@ -20,7 +20,7 @@ Once pasos, en este orden; cada uno queda en `manifest.json` como `pending`, `in
 | `verify` | Cada severidad alta re-verificada por un subagente nuevo | El agente lo marca hecho |
 | `filter` | Qué ve el equipo dueño y los conteos «N de M» | `ia.py filter` |
 | `prose` | Título, qué pasa y arreglo en el idioma del reporte, sin jerga ni culpas | El agente lo marca hecho, después del control de términos prohibidos |
-| `hygiene` | Ramas y salidas sin secretos ni archivos locales, corrida no commiteable | `ia.py hygiene` da limpio |
+| `hygiene` | Ramas y salidas sin secretos ni archivos locales, corrida no commiteable | `ia.py hygiene` da limpio (`--fix` antes enmascara las salidas guardadas, los archivos de publicación y la prosa de los hallazgos) |
 | `render` | Los dos HTML | `ia.py render` |
 
 ## Workers por host

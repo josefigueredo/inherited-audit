@@ -1,6 +1,7 @@
 """Pre-delivery hygiene: local tooling files, secrets and TruffleHog-prone identifiers in what the audit leaves behind."""
 from __future__ import annotations
 
+import copy
 import html
 import re
 import subprocess
@@ -187,24 +188,28 @@ def _opens_key(line: str, start: int = 0) -> bool:
     return last is not None and not PEM_END.search(line, last.end())
 
 
-def mask_line(line: str, prose: bool = False, config: bool = False) -> str:
+def mask_line(line: str, prose: bool = False, config: bool = False, tokens: bool = True) -> str:
     """The line with every secret, URL userinfo, secret-named value and flagged 40-char token masked, whitespace
-    intact. `prose` keeps 40-char code identifiers (camelCase, snake_case); `config` masks bare `key: value` too."""
+    intact. `prose` keeps 40-char code identifiers (camelCase, snake_case); `config` masks bare `key: value` too;
+    `tokens=False` leaves 40-char tokens alone (they are a scanner false positive, not a secret)."""
     text = PEM_SPAN.sub("****", line)
     text = USERINFO.sub(lambda m: (m.group(1) or m.group(2)) + "****@", text)
     for pattern in SECRETS:
         text = pattern.sub(_mask, text)
     text = mask_named(text, config)
+    if not tokens:
+        return text
     return TOKEN40.sub(_mask_token_prose if prose else _mask_token, text)
 
 
 class KeyMasker:
     """Line-by-line masking that knows about PEM private-key blocks: BEGIN..END (inclusive) is masked whole."""
 
-    def __init__(self, inside: bool = False, prose: bool = False, config: bool = False) -> None:
+    def __init__(self, inside: bool = False, prose: bool = False, config: bool = False, tokens: bool = True) -> None:
         self.inside = inside
         self.prose = prose
         self.config = config
+        self.tokens = tokens
 
     def line(self, line: str) -> str:
         """The masked line; advances the key-block state."""
@@ -214,13 +219,13 @@ class KeyMasker:
                 self.inside = _opens_key(line, end.end())
             return line[:len(line) - len(line.lstrip())] + "****" if line.strip() else line
         self.inside = _opens_key(line)
-        return mask_line(line, self.prose, self.config)
+        return mask_line(line, self.prose, self.config, self.tokens)
 
 
-def mask_text(text: str, inside: bool = False, prose: bool = False) -> str:
+def mask_text(text: str, inside: bool = False, prose: bool = False, tokens: bool = True) -> str:
     """`text` with every line masked (PEM blocks included); the number of lines is unchanged. `prose` keeps 40-char
-    code identifiers."""
-    masker = KeyMasker(inside, prose)
+    code identifiers; `tokens=False` keeps every 40-char token."""
+    masker = KeyMasker(inside, prose, tokens=tokens)
     return "\n".join(masker.line(raw) for raw in text.split("\n"))
 
 
@@ -441,6 +446,47 @@ def check_publish(run: Path) -> List[str]:
     for path in sorted(p for p in root.rglob("*") if p.is_file()):
         out += _scan_file(path, path.relative_to(Path(run)).as_posix())
     return out
+
+
+def _changed_lines(before: str, after: str) -> int:
+    return sum(1 for a, b in zip(before.split("\n"), after.split("\n")) if a != b)
+
+
+def _fix_file(path: Path) -> int:
+    """Rewrite one saved text file with what the checks flag masked (secrets, URL credentials, key blocks,
+    secret-named values; 40-char tokens such as lockfile hashes and test names stay); the number of lines changed.
+    Files that are not UTF-8 text are left alone."""
+    try:
+        text = path.read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError):
+        return 0
+    masked = mask_text(text, tokens=False)
+    if masked == text:
+        return 0
+    runmod.atomic_write(path, masked)
+    return _changed_lines(text, masked)
+
+
+def fix_run(run: Path) -> List[Tuple[str, int]]:
+    """Mask what the audit saved: every finding whose prose is not masked is written again (`finding set` masks on
+    write) and every text file under `outputs/` and `publish/` is rewritten masked. (relative path, lines changed)
+    for each file that changed, sorted; branches and reports are never touched (amend the branch, render again)."""
+    run = Path(run)
+    fixed: List[Tuple[str, int]] = []
+    for f in findingsmod.load_all(run):
+        if findingsmod.mask_prose(copy.deepcopy(f)) == f:
+            continue
+        path = run / "findings" / f"{f['id']}.json"
+        before = path.read_text(encoding="utf-8")
+        findingsmod.update(run, f["id"], {})
+        fixed.append((path.relative_to(run).as_posix(), _changed_lines(before, path.read_text(encoding="utf-8"))))
+    for folder in ("outputs", "publish"):
+        root = run / folder
+        for path in sorted(p for p in root.rglob("*") if p.is_file()) if root.is_dir() else []:
+            n = _fix_file(path)
+            if n:
+                fixed.append((path.relative_to(run).as_posix(), n))
+    return sorted(fixed)
 
 
 def check_run_dir(run: Path, manifest: dict) -> List[str]:
