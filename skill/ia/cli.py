@@ -40,6 +40,7 @@ COMMANDS = (
     ("cite-check", "check every citation of the findings against the base SHA"),
     ("merge-check", "check that the finding branches merge pairwise without conflicts"),
     ("hygiene", "run the pre-delivery checks on a run"),
+    ("mask", "copy stdin to stdout masked the way ia.py hygiene checks (for logs a script saves under outputs/)"),
     ("filter", "apply the owner-team filter and count what is shown"),
     ("publish", "prepare issue and PR bodies and the exact gh commands (never runs them)"),
     ("render", "write the two self-contained HTML reports"),
@@ -404,6 +405,21 @@ def _configure_hygiene(s: argparse.ArgumentParser) -> None:
                         "reports), then check")
 
 
+def _mask(args: argparse.Namespace) -> int:
+    """Stream stdin to stdout line by line, masked (secrets, key blocks, URL credentials, secret-named values,
+    40-char tokens); `--config` also masks bare `key: value` lines. The number of lines is unchanged."""
+    masker = hygienemod.KeyMasker(config=args.config)
+    for raw in sys.stdin:
+        line = raw.rstrip("\r\n")
+        sys.stdout.write(masker.line(line) + raw[len(line):])
+    return OK
+
+
+def _configure_mask(s: argparse.ArgumentParser) -> None:
+    s.add_argument("--config", action="store_true",
+                   help="the input is a config file: also mask bare `key: value` / `key=value` behind secret names")
+
+
 def _filter(args: argparse.Namespace) -> int:
     try:
         result = filtermod.run_filter(Path(args.run), args.n)
@@ -491,6 +507,7 @@ IMPLEMENTED = {
     "cite-check": (_cite_check, _configure_cite_check),
     "merge-check": (_merge_check, _configure_merge_check),
     "hygiene": (_hygiene, _configure_hygiene),
+    "mask": (_mask, _configure_mask),
     "filter": (_filter, _configure_filter),
     "publish": (_publish, _configure_publish),
     "render": (_render, _configure_render),

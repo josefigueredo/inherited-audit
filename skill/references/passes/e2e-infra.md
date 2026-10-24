@@ -59,7 +59,12 @@ whole stack instead of argued about.
    an existing emulator library already in the project's dependencies is fine, a new one needs the person's approval.
 2. Give every emulator the control routes above and a reset. Keep its state JSON-serializable so a scenario can be
    saved and restored.
-3. Write `docker-compose.yml` (or extend the project's) for the data stores, ports bound to `127.0.0.1`.
+3. Write `docker-compose.yml` (or extend the project's) for the data stores, ports bound to `127.0.0.1`. A healthcheck
+   must reach the server that stays up, not a bootstrap one. MongoDB with scripts in `/docker-entrypoint-initdb.d`
+   first starts a temporary `mongod` bound to `127.0.0.1` and then restarts it, so a ping on localhost turns healthy
+   too early and a seed service that waits on `service_healthy` fails with `ECONNREFUSED`. Ping by hostname instead:
+   `test: ["CMD-SHELL", "mongosh --quiet --host \"$$(hostname)\" --eval \"db.adminCommand('ping').ok\""]`. Same idea
+   for any image with an init phase: check the address the other services use.
 4. Write the harness: create the per-run database, run migrations, start the real server with the clean environment
    pointing at the emulators, wait for readiness, expose a stop that kills the server and drops the database.
 5. Write the e2e tests for the main flows (sign in, the core create-read-update path, one integration with an external
@@ -76,6 +81,12 @@ whole stack instead of argued about.
 - Each emulator's surface cites the client code it mirrors (`ALIAS/path` lines at the pinned SHA) in a comment or in
   the documentation.
 - "Green" means a saved run: `<run-dir>/outputs/tests-<ALIAS>-e2e.txt`, masked.
+- Every log or output a script saves (test output, `docker compose logs`, server logs) goes through
+  `python3 <skill-dir>/ia.py mask` on its way to disk, for example
+  `docker compose logs --no-color | python3 <skill-dir>/ia.py mask > <run-dir>/outputs/e2e/logs/<name>.log`. It masks
+  what `ia.py hygiene` checks (secrets, key blocks, URL credentials, the value behind a secret-named key such as an
+  `X-API-Token` header, 40-character tokens), so a saved log passes hygiene. A `sed` of known values is not enough:
+  it misses the headers. Never mask a file the stack runs (compose file, scripts): use an environment variable there.
 - Behaviour you could not emulate (a provider feature with no local equivalent) is listed as not covered, never
   implied.
 

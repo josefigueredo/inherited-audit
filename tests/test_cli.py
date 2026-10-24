@@ -77,5 +77,30 @@ class CliTest(unittest.TestCase):
         self.assertTrue((repo / "a.txt").is_file())
 
 
+
+class MaskCommandTest(unittest.TestCase):
+    DEFAULT = "s3cr3tDefault9"
+
+    def mask(self, text, *args):
+        return subprocess.run([sys.executable, str(SKILL / "ia.py"), "mask", *args], input=text, capture_output=True,
+                              text=True)
+
+    def test_mask_reads_stdin_and_writes_it_masked_line_for_line(self):
+        ghp = "ghp_" + "a1B2c3D4e5" * 3 + "a1B2c3"
+        text = (f"ok\n{{\"headers\":{{\"X-API-Token\":\"{self.DEFAULT}\"}}}}\nexport DB_PASSWORD={self.DEFAULT}\n"
+                f"{ghp}\n")
+        res = self.mask(text)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertNotIn(self.DEFAULT, res.stdout)
+        self.assertNotIn(ghp, res.stdout)
+        self.assertEqual(res.stdout.count("\n"), text.count("\n"))
+        self.assertTrue(res.stdout.startswith("ok\n"))
+
+    def test_mask_config_also_masks_bare_assignments(self):
+        line = "  password: " + self.DEFAULT + "\n"
+        self.assertIn(self.DEFAULT, self.mask(line).stdout)
+        self.assertEqual(self.mask(line, "--config").stdout, "  password: ****\n")
+
+
 if __name__ == "__main__":
     unittest.main()
