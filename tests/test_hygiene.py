@@ -439,6 +439,12 @@ class NamedSecretTest(unittest.TestCase):
         self.assertEqual(hygiene.mask_named('{"client_secret": "' + DEFAULT + '"}'), '{"client_secret": "****"}')
         self.assertEqual(hygiene.mask_named("export DB_PASSWORD=" + DEFAULT), "export DB_PASSWORD=****")
 
+    def test_assignment_nested_after_another_key_is_still_seen(self):
+        self.assertEqual(hygiene.mask_named("env: DB_PASSWORD=" + DEFAULT), "env: DB_PASSWORD=****")
+        self.assertEqual(hygiene.mask_named("  args: API_TOKEN=" + DEFAULT, config=True), "  args: API_TOKEN=****")
+        self.assertEqual(hygiene.mask_named('{"what": "Sends {"api_key": "' + DEFAULT + '"}"}'),
+                         '{"what": "Sends {"api_key": "****"}"}')
+
     def test_curl_header_with_a_secret_name_masked(self):
         line = "  -H 'X-API-Token: " + DEFAULT + "' \\"
         self.assertEqual(hygiene.mask_named(line), "  -H 'X-API-Token: ****' \\")
@@ -448,7 +454,8 @@ class NamedSecretTest(unittest.TestCase):
         for line in ("token-ttl: 3600", "token-enabled: true", "token-uri: https://oauth2.example.com/token",
                      "- key: DB_HOST", "key-store-type: PKCS12", "keycloak: realm", "cache-key-prefix: users",
                      "primaryKey: id", "token-header-name: X-API-Token", "password: ****",
-                     "password: <your-password>", "api-key: $API_KEY", "tokenizer: standard"):
+                     "password: <your-password>", "api-key: $API_KEY", "tokenizer: standard",
+                     'const val API_TOKEN_SOURCE_ATTRIBUTE = "apiTokenSource"', 'TOKEN_CLAIM = "sub"'):
             self.assertEqual(hygiene.mask_named(line, config=True), line)
 
     def test_masking_is_idempotent(self):
@@ -477,6 +484,30 @@ class NamedSecretTest(unittest.TestCase):
                                    '<span class="ln"><i>2</i>password: plain-in-code</span></pre>\n'
                                    '<p>The token: is rotated daily.</p>\n'})
         self.assertEqual(hygiene.check_reports(run), [])
+
+
+class NamedSecretRunFilesTest(unittest.TestCase):
+    def test_outputs_findings_and_publish_flag_named_values_without_echoing_them(self):
+        run = make_dir()
+        write_tree(run, {"outputs/C-01-red.txt": "env: DB_PASSWORD=" + DEFAULT + "\n",
+                         "findings/C-01.json": '{"what_happens": "Sends {\\"api_key\\": \\"' + DEFAULT + '\\"}"}\n',
+                         "publish/pr-1.md": "curl -H 'X-API-Token: " + DEFAULT + "' https://x\n"})
+        for check in (hygiene.check_outputs, hygiene.check_findings, hygiene.check_publish):
+            out = check(run)
+            self.assertEqual(len(out), 1, (check.__name__, out))
+            self.assertIn(hygiene.R_NAMED, out[0])
+            self.assertNotIn(DEFAULT, out[0])
+
+    def test_masked_values_and_bare_config_lines_in_outputs_are_clean(self):
+        run = make_dir()
+        write_tree(run, {"outputs/a.txt": "DB_PASSWORD=****\npassword: plain-in-a-log\n",
+                         "findings/C-01.json": '{"what_happens": "Sends {\\"api_key\\": \\"****\\"}"}\n'})
+        self.assertEqual(hygiene.check_outputs(run) + hygiene.check_findings(run), [])
+
+    def test_reports_report_each_named_hit_once(self):
+        run = make_dir()
+        write_tree(run, {"r.html": '<pre><span class="ln"><i>1</i>x = "a"; DB_PASSWORD=' + DEFAULT + '</span></pre>\n'})
+        self.assertEqual(len(hygiene.check_reports(run)), 1, hygiene.check_reports(run))
 
 
 class ProseIdentifierTest(unittest.TestCase):
