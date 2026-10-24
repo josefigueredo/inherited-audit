@@ -129,6 +129,10 @@ pass before closing.
   touches branches, reports, binary files or files something runs (config, scripts, Dockerfiles, such as the e2e
   infra): amend the branch, render again, move a literal in a runnable file to an environment variable, and decide
   on a binary by hand.
+- No LLM attribution: hygiene fails on attribution phrases (a co-author trailer naming a model or tool, "generated
+  with" one, the robot emoji, the tools' noreply addresses) in `publish/` bodies and scripts and in the messages of
+  every commit on the finding branches, and on a tool as a commit's author or committer. It matches phrases, not bare
+  words: "cursor" as a pagination word passes. Reword the line or amend the commit.
 
 ## Branches
 
@@ -151,5 +155,13 @@ pass before closing.
   one without a branch, to `publish_repo` when set, otherwise to its most cited repo. When it cites several repos and
   went by majority, `commands.sh` says so in a comment: check those before running, and set `publish_repo` with
   `ia.py finding set` where the fix belongs elsewhere.
+- Labels: each issue gets them from its report and dimension (`bug`; `distributed` adds `resilience`; `security`,
+  `container` and `supply-chain` give `security`, the last one also `supply-chain`; quality gives `architecture`,
+  `clean-code`, `documentation`, `resilience` or `testing`), plus `ci` when the title starts with "CI" or a cite is
+  under `.github/workflows/`. Each PR gets its findings' labels plus `testing`. `commands.sh` creates every label it
+  uses in each repo before the first issue (`|| true`, never `--force`, so the team's colors stay).
+- PR titles are conventional commits: the subject of the first finding's `sha_test` commit, or `test: <title>` when
+  it is not one; a group adds " (+N more)" only while the title fits 100 characters (commitlint's header limit), and a
+  longer subject is cut at a word with "…".
 - Warn the person when they turn it on: on someone else's system, publishing is exactly what the filter tries to keep
   measured and small.

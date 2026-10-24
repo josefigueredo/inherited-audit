@@ -7,7 +7,7 @@ import sys
 import unittest
 from pathlib import Path
 
-from helpers import SKILL, make_dir, make_git_repo, run_cli
+from helpers import SKILL, git, make_dir, make_git_repo, run_cli, write_tree
 
 from ia import findings as findingsmod
 from ia import publish
@@ -98,7 +98,7 @@ class PublishTest(unittest.TestCase):
         self.assertLess(cmds.index("# Before running: push"), cmds.index("gh issue create"))
         self.assertEqual(cmds.count("gh issue create"), 3)
         title = shlex.quote("Bug it's here")
-        self.assertIn(f"I_C_01=$(gh issue create --repo o/r --title {title} --body-file "
+        self.assertIn(f"I_C_01=$(gh issue create --repo o/r --title {title} --label bug --body-file "
                       f"{shlex.quote(str(out / ('issue-' + c1 + '.md')))})", cmds)
         self.assertIn("I_C_01=${I_C_01##*/}", cmds)
         self.assertLess(cmds.index(f"# {c1}: Bug it's here"), cmds.index("I_C_01=$("))
@@ -372,11 +372,12 @@ def cites(*aliases):
 
 def add_cross(run, evidence, report="quality", branch="", **extra):
     base = {"category": "x", "title": "Cross", "verdict": "confirmed", "severity": "low", "confidence": "docs",
-            "source": "t", "what_happens": "It breaks.", "evidence": evidence, **extra}
+            "source": "t", "what_happens": "It breaks.", "evidence": evidence}
     if report == "quality":
         base.update(report="quality", dimension="code", suggestion="s", effort="S")
     else:
         base.update(report="correctness", dimension="bug", branch=branch, prod_files=["a.py"])
+    base.update(extra)
     fid = findingsmod.add(run, base)
     findingsmod.update(run, fid, {"shown": True})
     return fid
@@ -496,6 +497,134 @@ class PublishRepoTest(unittest.TestCase):
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertIn(f"{q} -> issue #7\n", res.stdout)
         self.assertIn(f"{c} -> issue #7\n", res.stdout)
+
+
+def red_commit(repo, branch, subject):
+    """A branch with one commit whose subject is `subject`; returns its sha."""
+    git(repo, "checkout", "-q", "-b", branch, "main")
+    write_tree(repo, {f"t_{branch.replace('/', '_')}.py": "x\n"})
+    git(repo, "add", "-A")
+    git(repo, "-c", "commit.gpgsign=false", "commit", "-q", "-m", subject)
+    sha = git(repo, "rev-parse", "HEAD")
+    git(repo, "checkout", "-q", "main")
+    return sha
+
+
+def flag_value(line, flag):
+    tokens = shlex.split(line.split("$(", 1)[-1].rstrip(")"))
+    return tokens[tokens.index(flag) + 1] if flag in tokens else None
+
+
+def issue_line(cmds, fid):
+    return next(x for x in cmds.splitlines() if x.startswith(f"I_{fid.replace('-', '_')}=$(gh issue create"))
+
+
+def pr_line(cmds, n=1):
+    return [x for x in cmds.splitlines() if x.startswith("gh pr create")][n - 1]
+
+
+class PublishLabelsTest(unittest.TestCase):
+    def publish(self, run):
+        publish.prepare_publish(run)
+        return (run / "publish" / "commands.sh").read_text(encoding="utf-8")
+
+    def test_issue_labels_come_from_report_and_dimension(self):
+        run = multi_run(API={"a.py": "x\n"})
+        cases = {
+            add_cross(run, cites("API"), report="correctness", branch="fix/a"): "bug",
+            add_cross(run, cites("API"), report="correctness", branch="fix/b",
+                      dimension="distributed"): "bug,resilience",
+            add_cross(run, cites("API"), report="correctness", branch="fix/c",
+                      dimension="supply-chain"): "security,supply-chain",
+            add_cross(run, cites("API"), report="correctness", branch="fix/d", dimension="container"): "security",
+            add_cross(run, cites("API")): "clean-code",
+            add_cross(run, cites("API"), dimension="docs"): "documentation",
+            add_cross(run, cites("API"), dimension="tests"): "testing",
+            add_cross(run, cites("API"), dimension="architecture"): "architecture",
+        }
+        cmds = self.publish(run)
+        for fid, expected in cases.items():
+            self.assertEqual(flag_value(issue_line(cmds, fid), "--label"), expected, fid)
+
+    def test_ci_label_from_title_or_workflow_cite(self):
+        run = multi_run(API={"a.py": "x\n"})
+        by_title = add_cross(run, cites("API"), title="CI runs without a lockfile")
+        by_cite = add_cross(run, [{"cite": "API/.github/workflows/ci.yml:1-2", "from": 1, "to": 2, "note": ""}],
+                            dimension="resilience")
+        not_ci = add_cross(run, cites("API"), title="CIDR ranges are parsed twice")
+        cmds = self.publish(run)
+        self.assertEqual(flag_value(issue_line(cmds, by_title), "--label"), "clean-code,ci")
+        self.assertEqual(flag_value(issue_line(cmds, by_cite), "--label"), "resilience,ci")
+        self.assertEqual(flag_value(issue_line(cmds, not_ci), "--label"), "clean-code")
+
+    def test_pr_labels_are_the_union_plus_testing(self):
+        run = make_run()
+        add_c(run, ["s.py"])
+        add_c(run, ["s.py"], dimension="distributed")
+        cmds = self.publish(run)
+        self.assertEqual(flag_value(pr_line(cmds), "--label"), "bug,resilience,testing")
+
+    def test_labels_are_created_per_repo_before_any_issue_without_force(self):
+        run = multi_run(API={"a.py": "x\n"}, BFF={"a.py": "x\n"})
+        add_cross(run, cites("API"), report="correctness", branch="fix/a")
+        add_cross(run, cites("BFF"), dimension="docs")
+        cmds = self.publish(run)
+        lines = cmds.splitlines()
+        creates = [x for x in lines if x.startswith("gh label create")]
+        first_issue = next(i for i, x in enumerate(lines) if "gh issue create" in x)
+        self.assertTrue(all(lines.index(x) < first_issue for x in creates))
+        self.assertTrue(all(x.endswith(" || true") and "--force" not in x for x in creates))
+        made = {(shlex.split(x)[3], flag_value(x, "--repo")) for x in creates}
+        self.assertEqual(made, {("bug", "o/api"), ("testing", "o/api"), ("documentation", "o/bff")})
+        bug = next(x for x in creates if " bug " in x)
+        self.assertEqual(flag_value(bug, "--color"), "d73a4a")
+        self.assertEqual(flag_value(bug, "--description"), "Something isn't working")
+        self.assertEqual(subprocess.run(["sh", "-n", str(run / "publish" / "commands.sh")]).returncode, 0)
+
+
+class PublishTitlesTest(unittest.TestCase):
+    def setUp(self):
+        self.run = multi_run(API={"a.py": "x\n"})
+        self.repo = Path(runmod.load(self.run)["repos"][0]["path"])
+
+    def publish(self):
+        publish.prepare_publish(self.run)
+        return (self.run / "publish" / "commands.sh").read_text(encoding="utf-8")
+
+    def red(self, branch, subject, title="Cross"):
+        sha = red_commit(self.repo, branch, subject)
+        return add_cross(self.run, cites("API"), report="correctness", branch=branch, sha_test=sha, title=title)
+
+    def test_pr_title_is_the_conventional_subject_of_the_red_test_commit(self):
+        self.red("fix/a", "test(orders): reproduce the double charge")
+        self.assertEqual(flag_value(pr_line(self.publish()), "--title"), "test(orders): reproduce the double charge")
+
+    def test_non_conventional_subject_or_no_sha_falls_back_to_test_title(self):
+        self.red("fix/a", "Add a failing test", title="Orders charge twice")
+        self.assertEqual(flag_value(pr_line(self.publish()), "--title"), "test: Orders charge twice")
+        run = make_run()
+        add_c(run, ["a.py"], title="No sha here")
+        publish.prepare_publish(run)
+        cmds = (run / "publish" / "commands.sh").read_text(encoding="utf-8")
+        self.assertEqual(flag_value(pr_line(cmds), "--title"), "test: No sha here")
+
+    def test_group_suffix_only_while_the_title_fits_100_chars(self):
+        a = red_commit(self.repo, "fix/a", "test: short subject")
+        for branch, sha in (("fix/a", a), ("fix/b", "")):
+            findingsmod.update(self.run, add_cross(self.run, cites("API"), report="correctness", branch=branch),
+                               {"sha_test": sha, "prod_files": ["shared.py"]})
+        self.assertEqual(flag_value(pr_line(self.publish()), "--title"), "test: short subject (+1 more)")
+
+    def test_long_group_title_drops_the_suffix_and_long_subject_is_cut(self):
+        long = "test: " + " ".join(["word"] * 19)  # 100 chars
+        self.assertEqual(len(long), 100)
+        a = red_commit(self.repo, "fix/a", long)
+        for branch, sha in (("fix/a", a), ("fix/b", "")):
+            findingsmod.update(self.run, add_cross(self.run, cites("API"), report="correctness", branch=branch),
+                               {"sha_test": sha, "prod_files": ["shared.py"]})
+        self.assertEqual(flag_value(pr_line(self.publish()), "--title"), long)
+        self.assertEqual(publish.cut_title(long + " more words"), "test: " + " ".join(["word"] * 18) + "…")
+        self.assertLessEqual(len(publish.cut_title("x" * 300)), 100)
 
 
 if __name__ == "__main__":

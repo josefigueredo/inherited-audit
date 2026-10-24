@@ -20,7 +20,7 @@ Once pasos, en este orden; cada uno queda en `manifest.json` como `pending`, `in
 | `verify` | Cada severidad alta re-verificada por un subagente nuevo | El agente lo marca hecho |
 | `filter` | Qué ve el equipo dueño y los conteos «N de M» | `ia.py filter` |
 | `prose` | Título, qué pasa y arreglo en el idioma del reporte, sin jerga ni culpas | El agente lo marca hecho, después del control de términos prohibidos |
-| `hygiene` | Ramas y salidas sin secretos ni archivos locales, corrida no commiteable | `ia.py hygiene` da limpio (`--fix` antes enmascara las salidas guardadas, los archivos de publicación y la prosa de los hallazgos) |
+| `hygiene` | Ramas y salidas sin secretos ni archivos locales, sin atribución a un LLM en los commits de las ramas ni en los archivos de publicación, corrida no commiteable | `ia.py hygiene` da limpio (`--fix` antes enmascara las salidas guardadas, los archivos de publicación y la prosa de los hallazgos) |
 | `render` | Los dos HTML | `ia.py render` |
 
 ## Workers por host
@@ -43,7 +43,7 @@ Las pasadas propias están en [`skill/references/passes/`](../skill/references/p
 
 | Opción | Por defecto | Qué hace |
 |---|---|---|
-| `publish` | apagada | Al final, después de `filter`, `ia.py publish` escribe cuerpos de issues y PRs y `publish/commands.sh` con los comandos `gh` exactos (cada uno con `--repo`; los PRs salen en borrador y referencian el issue sin cerrarlo; el push queda comentado; cada issue creado imprime su número). Un hallazgo con rama manda su issue al repo de su rama (su primera cita), el mismo de su PR; uno sin rama, al de `publish_repo` si lo tiene, si no al repo más citado, con un comentario en `commands.sh` para revisarlo cuando cita varios. Nunca los corre |
+| `publish` | apagada | Al final, después de `filter`, `ia.py publish` escribe cuerpos de issues y PRs y `publish/commands.sh` con los comandos `gh` exactos (cada uno con `--repo`; los PRs salen en borrador y referencian el issue sin cerrarlo; el push queda comentado; cada issue creado imprime su número; issues y PRs llevan labels según la dimensión, que el script crea antes en cada repo, y el título de cada PR es el asunto del commit con el test rojo, en conventional commits). Un hallazgo con rama manda su issue al repo de su rama (su primera cita), el mismo de su PR; uno sin rama, al de `publish_repo` si lo tiene, si no al repo más citado, con un comentario en `commands.sh` para revisarlo cuando cita varios. Nunca los corre |
 
 ## La carpeta de una corrida
 
