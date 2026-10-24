@@ -455,13 +455,13 @@ class SecretMaskTest(unittest.TestCase):
         self.assertIn("<pre data-config>", html)
         self.assertEqual(hygienemod.check_reports(run), [])
 
-    def test_secret_named_value_in_old_prose_is_masked_by_the_filter_rewrite(self):
+    def test_secret_named_value_in_prose_is_masked_by_render_for_any_dimension(self):
         run, _, _ = new_run()
         findingsmod.add(run, base())
         path = run / "findings" / "C-01.json"
-        raw = path.read_text(encoding="utf-8").replace('"It breaks."', '"Sends {\\"api_key\\": \\"opaque1\\"}."')
-        path.write_text(raw, encoding="utf-8")
         filtered(run)
+        path.write_text(path.read_text(encoding="utf-8").replace(
+            '"It breaks."', '"Sends {\\"api_key\\": \\"opaque1\\"}."'), encoding="utf-8")
         rendermod.render_report(run, "correctness")
         html = "".join(p.read_text(encoding="utf-8") for p in run.glob("*.html"))
         self.assertNotIn("opaque1", html)

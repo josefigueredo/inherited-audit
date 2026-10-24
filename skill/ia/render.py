@@ -194,9 +194,12 @@ SENSITIVE_DIMENSIONS = ("security", "supply-chain")
 
 
 def _safe(f: dict, text: object) -> str:
-    """Free text of a finding; for security and supply-chain findings every line goes through hygiene masking."""
+    """Free text of a finding: secret-named values are always masked (hygiene checks reports for them); for security
+    and supply-chain findings every line goes through full hygiene masking."""
     text = "" if text is None else str(text)
-    return hygienemod.mask_text(text, prose=True) if f.get("dimension") in SENSITIVE_DIMENSIONS else text
+    if f.get("dimension") in SENSITIVE_DIMENSIONS:
+        return hygienemod.mask_text(text, prose=True)
+    return hygienemod.mask_named(text)
 
 
 def _prose(f: dict, key: str) -> str:

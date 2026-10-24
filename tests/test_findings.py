@@ -152,6 +152,16 @@ class DuplicateTests(unittest.TestCase):
         self.assertEqual(findings.add(run, candidate(exclude="duplicate", duplicate_of="C-01")), "C-02")
 
 
+    def test_proof_done_warning_skips_merged_duplicates(self):
+        run = make_run()
+        findings.add(run, candidate())
+        findings.add(run, candidate(exclude="duplicate", duplicate_of="C-01"))
+        r = run_cli(["step", "--run", str(run), "proof", "done"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("1 correctness findings are still candidates", r.stderr)
+        self.assertNotIn("C-02", r.stderr)
+
+
 class ValidateTests(unittest.TestCase):
     def test_valid_minimal_correctness_candidate_passes(self):
         self.assertEqual(findings.validate(candidate(id="C-01")), [])

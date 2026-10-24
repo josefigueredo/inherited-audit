@@ -106,7 +106,8 @@ def _step(args: argparse.Namespace) -> int:
     runmod.set_step(run_dir, args.step, args.state, args.force_open)
     print(f"{args.step}: {args.state}")
     if args.step == "proof" and args.state == "done":
-        left = findingsmod.list_lines(findingsmod.load_all(run_dir), "correctness", "candidate")
+        open_items = [f for f in findingsmod.load_all(run_dir) if f.get("exclude") != "duplicate"]
+        left = findingsmod.list_lines(open_items, "correctness", "candidate")
         if left:
             print(f"warning: proof is done but {len(left)} correctness findings are still candidates (not proven, not "
                   "discarded); they stay out of the reports unless confirmed:\n  " + "\n  ".join(left), file=sys.stderr)
