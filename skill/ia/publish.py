@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import shlex
+from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -42,14 +43,50 @@ def has_userinfo(remote: str) -> bool:
     return hygienemod.has_credentials(remote)
 
 
-def _alias(f: dict) -> str:
+def _cited(f: dict) -> List[str]:
+    """The alias of every parseable cite, in evidence order."""
+    out = []
     for ev in f.get("evidence") or []:
         if isinstance(ev, dict):
             try:
-                return parse_cite(ev.get("cite") or "", with_commit=False)[0]
+                out.append(parse_cite(ev.get("cite") or "", with_commit=False)[0])
             except ValueError:
                 continue
-    return ""
+    return out
+
+
+def route(f: dict, repos: Dict[str, dict]) -> Tuple[str, str]:
+    """The alias a finding's issue (and PR) goes to, plus a note for commands.sh ("" when there is nothing to review).
+
+    A finding with a branch goes to the repo of its first cite, which is where its branch lives (the same rule
+    merge-check uses): its PR can only reference an issue of its own repo. Without a branch, `publish_repo` wins;
+    otherwise the most cited alias, the synthetic ROOT not counting unless it is the only one, ties going to the
+    first cited of the tied ones.
+    """
+    cited = _cited(f)
+    explicit = f.get("publish_repo") or ""
+    if f.get("branch"):
+        alias = cited[0] if cited else ""
+        same = explicit == alias or (explicit in repos and alias in repos
+                                     and repos[explicit]["path"] == repos[alias]["path"])
+        if not explicit or same:
+            return alias, ""
+        return alias, (f"{f['id']}: publish_repo {explicit} ignored: its branch {f['branch']} is in {alias} (the "
+                       "first cite), and the PR can only reference an issue of its own repo")
+    if explicit:
+        return explicit, ""
+    counted = [a for a in cited if not (repos.get(a) or {}).get("root")] or cited
+    if not counted:
+        return "", ""
+    counts = Counter(counted)
+    top = max(counts.values())
+    alias = next(a for a in counted if counts[a] == top)
+    if len(counts) == 1:
+        return alias, ""
+    ranked = sorted(counts, key=lambda a: (-counts[a], counted.index(a)))
+    listed = ", ".join(f"{a} {counts[a]}" for a in ranked)
+    return alias, (f"{f['id']}: cites {listed}; goes to {alias} by majority (set publish_repo if the fix belongs to "
+                   "another repo)")
 
 
 def _files(f: dict) -> List[str]:
@@ -58,7 +95,7 @@ def _files(f: dict) -> List[str]:
 
 
 def _keys(f: dict) -> List[Tuple[str, str]]:
-    alias = _alias(f)
+    alias = route(f, {})[0]  # only branched findings are grouped: their repo needs no manifest
     return [(alias, p) for p in _files(f)]
 
 
@@ -144,7 +181,8 @@ def _issue_lines(f: dict, repo: Optional[dict], body: Path) -> Tuple[List[str], 
     # The assignment carries gh's exit status (set -e stops on a failure); then keep the number after the last '/'.
     return [_comment(f"{f['id']}: {_title(f)}"),
             f"{var}=$(gh issue create --repo {q(target)} --title {q(_title(f))} --body-file {q(str(body))})",
-            f"{var}=${{{var}##*/}}"], True
+            f"{var}=${{{var}##*/}}",
+            f'echo "{f["id"]} -> issue #${{{var}}}"'], True
 
 
 def _pr_lines(n: int, group: List[dict], repo: Optional[dict], out: Path, created: set) -> List[str]:
@@ -212,8 +250,9 @@ def prepare_publish(run: Path) -> Path:
     for f in shown:
         body = out / f"issue-{f['id']}.md"
         body.write_text(_issue_body(f), encoding="utf-8")
-        lines, ok = _issue_lines(f, repos.get(_alias(f)), body)
-        cmds += lines
+        alias, note = route(f, repos)
+        lines, ok = _issue_lines(f, repos.get(alias), body)
+        cmds += ([_comment(note)] if note else []) + lines
         if ok:
             created.add(f["id"])
     groups = pr_groups(items)
@@ -223,6 +262,6 @@ def prepare_publish(run: Path) -> Path:
         shared = sorted(p for _, p in keys_of[n - 1] & others)
         (out / f"pr-{n}.md").write_text(_pr_static_body(group, shared), encoding="utf-8")
         cmds.append("")
-        cmds += _pr_lines(n, group, repos.get(_alias(group[0])), out, created)
+        cmds += _pr_lines(n, group, repos.get(route(group[0], repos)[0]), out, created)
     (out / "commands.sh").write_text("\n".join(cmds) + "\n", encoding="utf-8")
     return out

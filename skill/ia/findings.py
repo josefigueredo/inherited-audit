@@ -38,7 +38,8 @@ DEFAULTS = {
     "branch": "", "base": "", "sha_test": "", "sha_fix": "", "prod_files": [], "tests": [], "red_reason": "",
     "outputs": {"red": "", "green": "", "suite": ""},
     "contrast": {"model": "", "same_family": False, "verdict": "", "scope": "", "rebutted": False, "rebuttal": ""},
-    "exclude": "", "duplicate_of": "", "shown": None, "audience": {"title": "", "what_happens": "", "fix_summary": ""},
+    "exclude": "", "duplicate_of": "", "publish_repo": "", "shown": None,
+    "audience": {"title": "", "what_happens": "", "fix_summary": ""},
 }
 
 
@@ -148,6 +149,8 @@ def validate(f: dict) -> List[str]:
                     problems.append(f"missing required field: {name} (confirmed correctness finding with "
                                     "execution confidence)")
     problems.extend(_duplicate_shape_problems(f))
+    if not isinstance(f.get("publish_repo", ""), str):
+        problems.append("publish_repo must be a string (a repo alias of the run)")
     if f.get("report") == "quality":
         for name in ("suggestion", "effort"):
             if _blank(f.get(name)):
@@ -187,6 +190,15 @@ def duplicate_problems(f: dict, others: Dict[str, dict]) -> List[str]:
         return [f"duplicate_of: {f['duplicate_of']} is itself a duplicate of {target.get('duplicate_of')}; point to "
                 f"{target.get('duplicate_of')} instead"]
     return []
+
+
+def publish_repo_problems(f: dict, manifest: dict) -> List[str]:
+    """`publish_repo`, when set, names one of the run's repo aliases."""
+    alias = f.get("publish_repo") or ""
+    aliases = [r["alias"] for r in manifest.get("repos") or []]
+    if not isinstance(alias, str) or not alias or alias in aliases:
+        return []
+    return [f"publish_repo: {alias!r} is not a repo of this run ({', '.join(aliases)})"]
 
 
 def _target_of(run: Path, f: dict) -> Dict[str, dict]:
@@ -276,7 +288,7 @@ def _fill(f: dict) -> dict:
 
 
 def add(run: Path, f: dict, warnings: Optional[List[str]] = None) -> str:
-    runmod.load(run)
+    manifest = runmod.load(run)
     if not isinstance(f, dict):
         raise FindingError(["finding must be a JSON object"])
     f = copy.deepcopy(f)
@@ -289,7 +301,8 @@ def add(run: Path, f: dict, warnings: Optional[List[str]] = None) -> str:
         if not problems and _path(run, filled["id"]).exists():
             problems.append(f"id: {filled['id']} already exists")
         if not problems:
-            problems = duplicate_problems(filled, _target_of(run, filled))
+            problems = (publish_repo_problems(filled, manifest)
+                        or duplicate_problems(filled, _target_of(run, filled)))
         if problems:
             raise FindingError(problems)
         _write(run, filled)
@@ -330,7 +343,8 @@ def _update(run: Path, fid: str, changes: dict, warnings: Optional[List[str]] = 
             node = node[part]
         node[parts[-1]] = value
     mask_prose(f, warnings)
-    problems = validate(f) or duplicate_problems(f, _target_of(run, f))
+    problems = (validate(f) or publish_repo_problems(f, runmod.load(run))
+                or duplicate_problems(f, _target_of(run, f)))
     if problems:
         raise FindingError(problems)
     _write(run, f)

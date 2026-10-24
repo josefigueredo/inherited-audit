@@ -141,9 +141,13 @@ pass before closing.
   never rename a branch that has an open PR.
 - `ia.py publish` (only after `ia.py filter`) writes the bodies and `publish/commands.sh`, runnable as prepared once
   reviewed: `set -eu`, absolute paths, `--repo owner/name` from each repo's remote (a repo without one is skipped with a
-  comment), issues first with their numbers captured so each PR body references the real ones, every PR created with
-  `--draft` and a body whose first line says the branch only adds a failing test, grouped PRs on a local
-  `audit/pr-<n>` branch merged in a throwaway worktree, the push left as a commented line, and `--base main` to adjust
-  if the default branch differs. The person runs it; the skill never does.
+  comment), issues first with their numbers captured (and printed: `C-07 -> issue #12`) so each PR body references
+  the real ones, every PR created with `--draft` and a body whose first line says the branch only adds a failing test,
+  grouped PRs on a local `audit/pr-<n>` branch merged in a throwaway worktree, the push left as a commented line, and
+  `--base main` to adjust if the default branch differs. The person runs it; the skill never does.
+- Each issue goes to one repo: a finding with a branch, to its branch's repo (its first cite), the same one as its PR;
+  one without a branch, to `publish_repo` when set, otherwise to its most cited repo. When it cites several repos and
+  went by majority, `commands.sh` says so in a comment: check those before running, and set `publish_repo` with
+  `ia.py finding set` where the fix belongs elsewhere.
 - Warn the person when they turn it on: on someone else's system, publishing is exactly what the filter tries to keep
   measured and small.
