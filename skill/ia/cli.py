@@ -382,6 +382,9 @@ def _configure_merge_check(s: argparse.ArgumentParser) -> None:
 
 
 def _hygiene(args: argparse.Namespace) -> int:
+    if args.fix:
+        for rel, n in hygienemod.fix_run(Path(args.run)):
+            print(f"fixed: {rel} ({n} line{'' if n == 1 else 's'})")
     problems, info = hygienemod.check_run(Path(args.run))
     for line in problems:
         print(line)
@@ -396,6 +399,9 @@ def _hygiene(args: argparse.Namespace) -> int:
 
 def _configure_hygiene(s: argparse.ArgumentParser) -> None:
     s.add_argument("--run", required=True, help="run directory")
+    s.add_argument("--fix", action="store_true",
+                   help="first mask saved outputs, publish files and finding prose in place (never branches or "
+                        "reports), then check")
 
 
 def _filter(args: argparse.Namespace) -> int:

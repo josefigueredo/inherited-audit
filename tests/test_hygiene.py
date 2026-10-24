@@ -510,6 +510,69 @@ class NamedSecretRunFilesTest(unittest.TestCase):
         self.assertEqual(len(hygiene.check_reports(run)), 1, hygiene.check_reports(run))
 
 
+class FixRunTest(unittest.TestCase):
+    def make(self):
+        repo, _ = make_git_repo({"a.py": "one\n"})
+        run = new_run(repo)
+        add_finding(run, "BACK", "")
+        path = run / "findings" / "Q-01.json"
+        path.write_text(path.read_text(encoding="utf-8").replace(
+            '"w"', '"Sends {\\"api_key\\": \\"' + DEFAULT + '\\"}"'), encoding="utf-8")
+        write_tree(run, {"outputs/log.txt": f"ok\nX DB_PASSWORD={DEFAULT}\ncall {IDENT40}\n{GHP}\n",
+                         "outputs/clean.txt": "nothing here\n",
+                         "publish/pr-1.md": "-H 'X-API-Token: " + DEFAULT + "'\n"})
+        return run
+
+    def test_fix_masks_outputs_publish_and_findings_and_says_where(self):
+        run = self.make()
+        before = (run / "outputs" / "clean.txt").stat().st_mtime_ns
+        fixed = hygiene.fix_run(run)
+        self.assertEqual(fixed, [("findings/Q-01.json", 1), ("outputs/log.txt", 2), ("publish/pr-1.md", 1)])
+        text = "".join((run / d / n).read_text(encoding="utf-8")
+                       for d, n in (("outputs", "log.txt"), ("publish", "pr-1.md"), ("findings", "Q-01.json")))
+        self.assertNotIn(DEFAULT, text)
+        self.assertNotIn(GHP, text)
+        self.assertIn(IDENT40, text)
+        self.assertIn("ok\nX DB_PASSWORD=****\n", text)
+        self.assertEqual((run / "outputs" / "clean.txt").stat().st_mtime_ns, before)
+        self.assertEqual(hygiene.check_outputs(run) + hygiene.check_findings(run) + hygiene.check_publish(run), [])
+        self.assertEqual(hygiene.fix_run(run), [])
+
+    def test_cli_fix_reports_files_never_values_then_checks(self):
+        run = self.make()
+        res = run_cli(["hygiene", "--run", str(run), "--fix"])
+        self.assertIn("fixed: outputs/log.txt (2 lines)", res.stdout)
+        self.assertIn("fixed: findings/Q-01.json (1 line)", res.stdout)
+        self.assertNotIn(DEFAULT, res.stdout + res.stderr)
+        self.assertNotIn("outputs/log.txt: ", res.stdout)
+        self.assertIn("hygiene: clean", res.stdout)
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+
+    def test_fix_leaves_40_char_tokens_in_outputs_alone(self):
+        run = make_dir()
+        evidence = ("integrity sha512-" + RANDOM40 + "/3BpcCysb5Vffu+B3==\n"
+                    "tests/t.py::test_list_tools_v2_returns_all_the_tools[a] PASSED\n")
+        write_tree(run, {"outputs/a.txt": evidence})
+        self.assertEqual(hygiene.fix_run(run), [])
+        self.assertEqual((run / "outputs" / "a.txt").read_text(encoding="utf-8"), evidence)
+
+    def test_binary_files_are_never_rewritten_and_still_reported(self):
+        run = self.make()
+        blob = b"\xff\xfe DB_PASSWORD=" + DEFAULT.encode() + b"\n"
+        (run / "outputs" / "blob.bin").write_bytes(blob)
+        self.assertNotIn("outputs/blob.bin", [rel for rel, _ in hygiene.fix_run(run)])
+        self.assertEqual((run / "outputs" / "blob.bin").read_bytes(), blob)
+        out = hygiene.check_outputs(run)
+        self.assertEqual(len(out), 1, out)
+        self.assertNotIn(DEFAULT, out[0])
+
+    def test_without_fix_nothing_is_rewritten(self):
+        run = self.make()
+        res = run_cli(["hygiene", "--run", str(run)])
+        self.assertEqual(res.returncode, 1)
+        self.assertIn(DEFAULT, (run / "outputs" / "log.txt").read_text(encoding="utf-8"))
+
+
 class ProseIdentifierTest(unittest.TestCase):
     def test_prose_keeps_a_40_char_code_identifier(self):
         text = f"Rename the bean to {IDENT40}."
