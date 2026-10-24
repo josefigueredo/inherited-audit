@@ -25,10 +25,12 @@ cd <ruta-a-tu-clon>/inherited-audit && ./install.sh
 |---|---|---|
 | `~/.claude/skills/inherited-audit` | `skill/` del repo | Sin `--cursor` |
 | `~/.cursor/skills/inherited-audit` | `skill/` del repo | Con `--cursor` |
+| `~/.claude/skills/inherited-fix` | `fix-skill/` del repo | Sin `--cursor` |
+| `~/.cursor/skills/inherited-fix` | `fix-skill/` del repo | Con `--cursor` |
 | `~/.claude/agents/ia-auditor.md` | `agents/claude/ia-auditor.md` | Con `--agents`, sin `--cursor` |
 | `~/.cursor/agents/ia-auditor.md` | `agents/cursor/ia-auditor.md` | Con `--agents` |
 
-Solo se enlaza `skill/`, así que `tests/` y `docs/` no quedan al alcance del agente (la tabla de referencia de `eval` ni siquiera está en el repo: vive aparte, y se pasa con `--reference <ruta>`; el test que la lee usa `IA_EVAL_REFERENCE`). Volver a correrlo no rompe
+Solo se enlazan `skill/` y `fix-skill/`, así que `tests/` y `docs/` no quedan al alcance del agente (la tabla de referencia de `eval` ni siquiera está en el repo: vive aparte, y se pasa con `--reference <ruta>`; el test que la lee usa `IA_EVAL_REFERENCE`). Volver a correrlo no rompe
 nada; si en una de esas rutas hay un archivo o una carpeta de verdad, no lo reemplaza y sale con 1. `./install.sh -h`
 muestra la ayuda y un argumento desconocido sale con 2.
 

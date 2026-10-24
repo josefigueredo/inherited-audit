@@ -45,15 +45,30 @@ Las pasadas propias están en [`skill/references/passes/`](../skill/references/p
 |---|---|---|
 | `publish` | apagada | Al final, después de `filter`, `ia.py publish` escribe cuerpos de issues y PRs y `publish/commands.sh` con los comandos `gh` exactos (cada uno con `--repo`; los PRs salen en borrador y referencian el issue sin cerrarlo; el push queda comentado; cada issue creado imprime su número; issues y PRs llevan labels según la dimensión, que el script crea antes en cada repo, y el título de cada PR es el asunto del commit con el test rojo, en conventional commits). Un hallazgo con rama manda su issue al repo de su rama (su primera cita), el mismo de su PR; uno sin rama, al de `publish_repo` si lo tiene, si no al repo más citado, con un comentario en `commands.sh` para revisarlo cuando cita varios. Nunca los corre |
 
+## Después de la auditoría: arreglos (inherited-fix)
+
+La auditoría se detiene en el test rojo. Arreglar un hallazgo ya publicado es una decisión posterior, del equipo dueño, y
+la lleva la skill compañera `inherited-fix` (carpeta `fix-skill/`; `install.sh` la enlaza al lado de esta). Usa el mismo
+CLI:
+
+| Acción | Qué hace |
+|---|---|
+| `ia.py fix plan` | Lista las ramas de PR para arreglar, con el número de PR y su base (con `gh` de solo lectura) y los hallazgos de cada una. Un PR de grupo (`audit/pr-N`) se arregla entero, en orden, en un solo worktree |
+| `ia.py fix start` | Crea el worktree en la rama del PR y el contexto de cada hallazgo. Corre la suite sobre un merge descartable de la base del PR y guarda los tests que pasan, por nombre (por conteo si no hay junit, y lo dice). Un hallazgo que ya pasa ahí queda `moot`. Necesita `fix.authorized_by` en el manifest |
+| `ia.py fix check` | Revisa los commits del arreglo: el test rojo intacto, el alcance (`prod_files`, `fix.extra_files`, tests nuevos), conventional commits de 100 caracteres o menos, sin palabra de cierre ni atribución, e higiene. Corre la suite sobre el merge y la compara con la del inicio |
+| `ia.py fix done` | Registra el arreglo solo con el chequeo y una revisión de otro agente con tres afirmaciones CONFIDENT sobre el mismo commit. Un `blocked` o `declined` vuelve atrás la rama local |
+| `ia.py fix publish` | Escribe `fix/commands.sh`: push sin forzar, el PR resuelto al correr, el cuerpo actual reescrito (nota de borrador → nota de arreglo, `Refs` → `Closes`), el título del commit de arreglo y `gh pr ready`. Con `--partial`, un grupo incompleto sube lo arreglado y sigue en borrador. Nunca lo corre |
+
 ## La carpeta de una corrida
 
 Por defecto `<carpeta que contiene la raíz git del primer repo>/<sistema>-inherited-audit/<fecha>/`, fuera de los repos auditados.
 
 | Contenido | Qué es |
 |---|---|
-| `manifest.json` | El estado: repos con su alias, commit y remoto; opciones; host; pasos; workers; línea base; filtro. No se edita a mano: el plan de cada repo cambia con `ia.py baseline --set` y el resto (`host`, `lang`, `options.publish`, `sections`, `strengths`, `baseline.<ALIAS>.tests_branch`, `baseline.<ALIAS>.result.*`) con `ia.py set` |
+| `manifest.json` | El estado: repos con su alias, commit y remoto; opciones; host; pasos; workers; línea base; filtro. No se edita a mano: el plan de cada repo cambia con `ia.py baseline --set` y el resto (`host`, `lang`, `options.publish`, `sections`, `strengths`, `baseline.<ALIAS>.tests_branch`, `baseline.<ALIAS>.result.*`, `fix.authorized_by`) con `ia.py set` |
 | `findings/<id>.json` | Un archivo por hallazgo |
-| `outputs/` | Salidas crudas: la suite de la base, la salida del test rojo de cada hallazgo de código y la del comando que confirma un hallazgo de cadena de suministro, contenedor o seguridad probado con un escáner. El verde y la suite por hallazgo son de corridas viejas: hoy no se escriben |
+| `outputs/` | Salidas crudas: la suite de la base, la salida del test rojo de cada hallazgo de código y la del comando que confirma un hallazgo de cadena de suministro, contenedor o seguridad probado con un escáner. El verde y la suite por hallazgo los escribe solo `ia.py fix` (`<id>-green.txt`, `<id>-fix-red.txt`, `<id>-fix-suite.txt`) |
+| `fix/` | Lo de inherited-fix: un worktree por rama de PR (`wt-*`), el contexto y el estado de cada rama y `commands.sh` |
 | `<sistema>-correctness.html`, `<sistema>-quality.html` | Los dos reportes |
 
 ## Un hallazgo

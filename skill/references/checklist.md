@@ -165,3 +165,11 @@ pass before closing.
   longer subject is cut at a word with "…".
 - Warn the person when they turn it on: on someone else's system, publishing is exactly what the filter tries to keep
   measured and small.
+
+## After the audit: fixes (inherited-fix)
+
+- The audit stops at the red test. Fixing a published red-test finding is a later, opt-in decision of the owner team,
+  run with the companion skill `inherited-fix` (`fix-skill/`, installed next to this one) through `ia.py fix plan|start|
+  check|done|publish`. It records `fix.authorized_by` in the manifest and, per finding, the `fix` object, `sha_fix`,
+  `tests[].green`, `outputs.green` and `outputs.suite`. `ia.py hygiene` also scans `<run>/fix/` (never its `wt-*`
+  worktrees).

@@ -500,14 +500,16 @@ def check_reports(run: Path) -> List[str]:
     return out
 
 
-def check_publish(run: Path) -> List[str]:
-    """Prepared publish files (`<run>/publish/*`) must carry no secret and no credentialed URL; bodies (`*.md`) and
-    scripts (`*.sh`) no LLM attribution either."""
+def _check_prepared(run: Path, folder: str, skip: str = "") -> List[str]:
+    """Prepared files under `<run>/<folder>` must carry no secret and no credentialed URL; bodies (`*.md`) and
+    scripts (`*.sh`) no LLM attribution either. Top-level entries whose name starts with `skip` are not read."""
     out: List[str] = []
-    root = Path(run) / "publish"
+    root = Path(run) / folder
     if not root.is_dir():
         return out
     for path in sorted(p for p in root.rglob("*") if p.is_file()):
+        if skip and path.relative_to(root).parts[0].startswith(skip):
+            continue
         rel = path.relative_to(Path(run)).as_posix()
         out += _scan_file(path, rel)
         if path.suffix in (".md", ".sh"):
@@ -517,6 +519,17 @@ def check_publish(run: Path) -> List[str]:
                 continue
             out += [f"{rel}: {R_ATTRIBUTION}: {hit}" for hit in filter(None, map(attribution_hit, text.splitlines()))]
     return out
+
+
+def check_publish(run: Path) -> List[str]:
+    """`<run>/publish/*`: see _check_prepared."""
+    return _check_prepared(run, "publish")
+
+
+def check_fix(run: Path) -> List[str]:
+    """`<run>/fix/*` (inherited-fix's context, bodies and commands), never the `fix/wt-*` worktrees: those hold the
+    audited repo's own source."""
+    return _check_prepared(run, "fix", skip="wt-")
 
 
 def _changed_lines(before: str, after: str) -> int:
@@ -577,7 +590,7 @@ def check_run_dir(run: Path, manifest: dict) -> List[str]:
 
 def check_run(run: Path) -> Tuple[List[str], List[str]]:
     """(problems, info) for a whole run: finding and tests branches, saved outputs, finding files, reports, publish
-    files and the run dir."""
+    and fix files and the run dir."""
     manifest = runmod.load(run)
     shas: Dict[str, str] = {}
     for repo in manifest["repos"]:
@@ -594,6 +607,7 @@ def check_run(run: Path) -> Tuple[List[str], List[str]]:
     problems += check_findings(run)
     problems += check_reports(run)
     problems += check_publish(run)
+    problems += check_fix(run)
     problems += _scan_file(Path(run) / "manifest.json", "manifest.json")
     problems += check_run_dir(run, manifest)
     return problems, info

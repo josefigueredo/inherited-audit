@@ -32,6 +32,19 @@ class InstallTest(unittest.TestCase):
         for repo_only in ("eval", "docs", "tests", "agents", "install.sh"):
             self.assertFalse((link / repo_only).exists(), repo_only)
 
+    def test_links_the_fix_skill_next_to_the_audit_skill(self) -> None:
+        home = make_dir()
+        out = run_install(home)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        link = home / ".claude" / "skills" / "inherited-fix"
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(link.resolve(), (ROOT / "fix-skill").resolve())
+        self.assertTrue((link.parent / "inherited-audit" / "ia.py").is_file())
+        cursor = make_dir()
+        self.assertEqual(run_install(cursor, "--cursor").returncode, 0)
+        self.assertTrue((cursor / ".cursor" / "skills" / "inherited-fix" / "SKILL.md").is_file())
+        self.assertFalse((cursor / ".claude").exists())
+
     def test_never_touches_agents_skills_nor_agent_folders_by_default(self) -> None:
         home = make_dir()
         self.assertEqual(run_install(home).returncode, 0)

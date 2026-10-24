@@ -9,12 +9,13 @@ Decile al agente, en cualquiera de los dos:
 
 > *«Instalá la skill inherited-audit desde <ruta-a-tu-clon>/inherited-audit»*
 
-Corre `./install.sh`, que enlaza solo la carpeta `skill/` en `~/.claude/skills/inherited-audit`. Esa única carpeta
-sirve para los dos hosts: Cursor también lee `~/.claude/skills` por compatibilidad. Por eso el instalador no escribe
+Corre `./install.sh`, que enlaza la carpeta `skill/` en `~/.claude/skills/inherited-audit` y `fix-skill/` (la skill
+compañera `inherited-fix`, para arreglar después los hallazgos publicados) al lado, en `~/.claude/skills/inherited-fix`.
+Esa carpeta sirve para los dos hosts: Cursor también lee `~/.claude/skills` por compatibilidad. Por eso el instalador no escribe
 nada en `~/.agents/skills`: Cursor vería la skill dos veces.
 
 Si solo usás Cursor, pedile *«Instalá la skill inherited-audit solo para Cursor»*: corre `./install.sh --cursor`, que la
-enlaza en `~/.cursor/skills/inherited-audit` en vez de `~/.claude/skills`. Va en una de las dos carpetas, nunca en las
+enlaza las dos en `~/.cursor/skills/` en vez de `~/.claude/skills`. Va en una de las dos carpetas, nunca en las
 dos: si encuentra la otra, no enlaza nada, avisa que Cursor la cargaría dos veces y sale con 1.
 
 Si una sesión que ya estaba abierta no encuentra la skill, cerrala y abrila de nuevo.

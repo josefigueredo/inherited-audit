@@ -23,6 +23,7 @@ from . import detect as detectmod
 from . import evaluate as evaluatemod
 from . import filter as filtermod
 from . import findings as findingsmod
+from . import fix as fixmod
 from . import hygiene as hygienemod
 from . import publish as publishmod
 from . import render as rendermod
@@ -43,6 +44,8 @@ COMMANDS = (
     ("mask", "copy stdin to stdout masked the way ia.py hygiene checks (for logs a script saves under outputs/)"),
     ("filter", "apply the owner-team filter and count what is shown"),
     ("publish", "prepare issue and PR bodies and the exact gh commands (never runs them)"),
+    ("fix", "inherited-fix: fix a published red-test branch and prepare the commands for its PR (plan, start, check, "
+            "publish, done)"),
     ("render", "write the two self-contained HTML reports"),
     ("eval", "score a run against an answer key of known findings"),
     ("coverage", "record and show which passes visited which modules (add, status)"),
@@ -450,6 +453,62 @@ def _configure_publish(s: argparse.ArgumentParser) -> None:
     s.add_argument("--run", required=True, help="run directory")
 
 
+def _fix(args: argparse.Namespace) -> int:
+    run_dir = Path(args.run)
+    try:
+        if args.action == "plan":
+            ids = [i.strip() for i in args.ids.split(",") if i.strip()] if args.ids else None
+            lines = fixmod.plan(run_dir, ids, args.severity, args.repo)
+        elif args.action == "start":
+            lines = fixmod.start(run_dir, args.target, args.base_ref, args.timeout)
+        elif args.action == "check":
+            passed, lines = fixmod.check(run_dir, args.id, args.allow_many, args.timeout)
+            for line in lines:
+                print(line)
+            return OK if passed else FINDINGS
+        elif args.action == "done":
+            lines = fixmod.done(run_dir, args.id)
+        else:
+            out, lines = fixmod.publish(run_dir, args.partial)
+            lines.append(f"prepared {out}  (nothing was executed; review it, then run it yourself)")
+    except findingsmod.FindingError as exc:
+        for problem in exc.problems:
+            print(f"error: {problem}", file=sys.stderr)
+        return FINDINGS
+    for line in lines:
+        print(line)
+    return OK
+
+
+def _configure_fix(s: argparse.ArgumentParser) -> None:
+    actions = s.add_subparsers(dest="action", metavar="<action>", required=True)
+    pl = actions.add_parser("plan", help="list the PR branches to fix, with PR number, base and members (read-only)")
+    pl.add_argument("--run", required=True, help="run directory")
+    pl.add_argument("--ids", help="only these findings, e.g. C-24,C-01")
+    pl.add_argument("--severity", choices=fixmod.SEVERITIES, help="only this severity")
+    pl.add_argument("--repo", help="only this repo alias")
+    st = actions.add_parser("start", help="worktree on the PR branch, context per finding, suite on the merge result")
+    st.add_argument("--run", required=True, help="run directory")
+    st.add_argument("target", help="a finding id (C-24) or its PR branch (fix/c-24-..., audit/pr-17)")
+    st.add_argument("--base-ref", metavar="REF",
+                    help="test aid: merge this local ref instead of origin/<PR base> from gh (a sandbox clone without "
+                         "a remote); also lets a branch without upstream start")
+    st.add_argument("--timeout", type=int, default=3600, help="seconds for the suite (default 3600)")
+    ck = actions.add_parser("check", help="check one finding's fix commits and run the suite on the merge result")
+    ck.add_argument("--run", required=True, help="run directory")
+    ck.add_argument("id", help="finding id, e.g. C-24")
+    ck.add_argument("--allow-many", action="store_true", help="allow more than one fix commit for this finding")
+    ck.add_argument("--timeout", type=int, default=3600, help="seconds for the suite (default 3600)")
+    dn = actions.add_parser("done", help="record a checked and reviewed fix (or a blocked/declined one) and remove "
+                                         "the worktree once its PR branch has nothing left")
+    dn.add_argument("--run", required=True, help="run directory")
+    dn.add_argument("id", help="finding id, e.g. C-24")
+    pb = actions.add_parser("publish", help="write fix/commands.sh: push, PR body rewrite, title, ready (never runs it)")
+    pb.add_argument("--run", required=True, help="run directory")
+    pb.add_argument("--partial", action="store_true",
+                    help="also a group PR with findings not done: push and a body note only, no retitle, no ready")
+
+
 def _render(args: argparse.Namespace) -> int:
     reports = list(findingsmod.REPORTS) if args.report == "both" else [args.report]
     filtered = isinstance(runmod.load(Path(args.run)).get("filter"), dict)
@@ -510,6 +569,7 @@ IMPLEMENTED = {
     "mask": (_mask, _configure_mask),
     "filter": (_filter, _configure_filter),
     "publish": (_publish, _configure_publish),
+    "fix": (_fix, _configure_fix),
     "render": (_render, _configure_render),
     "eval": (_eval, _configure_eval),
     "set": (_set, _configure_set),

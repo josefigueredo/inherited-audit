@@ -1,22 +1,26 @@
 #!/usr/bin/env bash
-# Install the inherited-audit skill for Claude Code and Cursor, or for Cursor only.
-#   ./install.sh            link skill/ into ~/.claude/skills/inherited-audit (Claude Code and Cursor read it)
-#   ./install.sh --cursor   link skill/ into ~/.cursor/skills/inherited-audit instead (Cursor only)
+# Install the inherited-audit and inherited-fix skills for Claude Code and Cursor, or for Cursor only.
+#   ./install.sh            link skill/ into ~/.claude/skills/inherited-audit and fix-skill/ into
+#                           ~/.claude/skills/inherited-fix (Claude Code and Cursor read them)
+#   ./install.sh --cursor   link both into ~/.cursor/skills/ instead (Cursor only)
 #   ./install.sh --agents   also link the optional subagent definitions:
 #                           agents/claude/ia-auditor.md -> ~/.claude/agents/ia-auditor.md (not with --cursor)
 #                           agents/cursor/ia-auditor.md -> ~/.cursor/agents/ia-auditor.md
-# Only skill/ is linked, so docs/ and tests/ are never installed. Cursor reads ~/.claude/skills and ~/.cursor/skills,
-# so the skill goes into one of them, never both, and never into ~/.agents/skills (Cursor would load it twice).
+# Only skill/ and fix-skill/ are linked, so docs/ and tests/ are never installed. Cursor reads ~/.claude/skills and
+# ~/.cursor/skills, so each skill goes into one of them, never both, and never into ~/.agents/skills (Cursor would
+# load it twice).
+# inherited-fix calls the inherited-audit CLI as its sibling folder, so both go into the same skills folder.
 # Re-running is safe. A real file or directory at a link path is never replaced: the script stops with exit 1.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NAME="inherited-audit"
+FIX_NAME="inherited-fix"
 AGENTS=0
 CURSOR=0
 for arg in "$@"; do
   case "$arg" in
-    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
     --agents) AGENTS=1 ;;
     --cursor) CURSOR=1 ;;
     *) echo "unknown argument: $arg" >&2; exit 2 ;;
@@ -33,17 +37,22 @@ link() {  # link <target> <path>: create or refresh a symlink, never replace a r
 }
 
 if [ "$CURSOR" = 1 ]; then
-  SKILL="$HOME/.cursor/skills/$NAME" OTHER="$HOME/.claude/skills/$NAME"
+  DIR="$HOME/.cursor/skills" OTHER_DIR="$HOME/.claude/skills"
 else
-  SKILL="$HOME/.claude/skills/$NAME" OTHER="$HOME/.cursor/skills/$NAME"
+  DIR="$HOME/.claude/skills" OTHER_DIR="$HOME/.cursor/skills"
 fi
-if [ -e "$OTHER" ] || [ -L "$OTHER" ]; then
-  echo "refusing to link $SKILL: $OTHER is there, and Cursor would load the skill twice; remove it and re-run" >&2
-  exit 1
-fi
+for name in "$NAME" "$FIX_NAME"; do
+  if [ -e "$OTHER_DIR/$name" ] || [ -L "$OTHER_DIR/$name" ]; then
+    echo "refusing to link $DIR/$name: $OTHER_DIR/$name is there, and Cursor would load the skill twice;" \
+      "remove it and re-run" >&2
+    exit 1
+  fi
+done
 status=0
-link "$REPO/skill" "$SKILL" || exit 1
-echo "skill: $SKILL -> $REPO/skill"
+link "$REPO/skill" "$DIR/$NAME" || exit 1
+echo "skill: $DIR/$NAME -> $REPO/skill"
+link "$REPO/fix-skill" "$DIR/$FIX_NAME" || exit 1
+echo "skill: $DIR/$FIX_NAME -> $REPO/fix-skill"
 if [ "$AGENTS" = 1 ]; then
   if [ "$CURSOR" = 1 ]; then
     link "$REPO/agents/cursor/ia-auditor.md" "$HOME/.cursor/agents/ia-auditor.md" || status=1

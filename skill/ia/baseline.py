@@ -16,7 +16,7 @@ from . import run as runmod
 
 TAIL_LINES = 200
 PLAN_KEYS = ("stack", "test_cmd", "coverage_cmd", "measure", "measured", "env", "pre", "deps", "deps_dirs", "junit",
-             "install_cmd")
+             "install_cmd", "typecheck_cmd")
 DEPS_MODES = ("symlink", "install", "none")
 # Non-interactive runs: npx must not download a missing package on its own (the plan's env can override).
 BASE_ENV = {"CI": "1", "npm_config_yes": "false", "NO_COLOR": "1", "FORCE_COLOR": "0"}
@@ -157,12 +157,11 @@ def _int(value: Optional[str]) -> int:
         return 0
 
 
-def parse_junit(cwd: Path, globs: List[str]) -> Optional[dict]:
-    """Counts summed over the JUnit XML reports under `cwd` that match `globs`; None when none could be read.
+def _junit_roots(cwd: Path, globs: List[str]) -> Tuple[list, List[str]]:
+    """The parsed roots of the JUnit XML reports under `cwd` that match `globs`, plus the files refused.
 
     The files come from the audited repo's build: anything with a DTD or entity declaration (an XML bomb or an
-    external entity), past the size cap, outside `cwd` or not well formed is listed in `skipped_files`, never parsed.
-    Only leaf <testsuite> elements count, so a <testsuites> or nested aggregate is not added twice.
+    external entity), past the size cap, outside `cwd` or not well formed is refused, never parsed.
     """
     import xml.etree.ElementTree as ET  # local: only JUnit-producing stacks need it
 
@@ -172,10 +171,7 @@ def parse_junit(cwd: Path, globs: List[str]) -> Optional[dict]:
         for path in sorted(Path(cwd).glob(pattern)):
             if path.is_file() and path not in paths:
                 paths.append(path)
-    if not paths:
-        return None
-    run = failures = errors = skipped = 0
-    read, refused = 0, []
+    roots, refused = [], []
     for path in paths:
         rel = path.relative_to(cwd).as_posix()
         try:
@@ -185,22 +181,61 @@ def parse_junit(cwd: Path, globs: List[str]) -> Optional[dict]:
             data = path.read_bytes()
             if b"<!DOCTYPE" in data or b"<!ENTITY" in data:
                 raise ValueError("declares a DTD or entities")
-            root = ET.fromstring(data)
+            roots.append(ET.fromstring(data))
         except (OSError, ValueError, ET.ParseError):
             refused.append(rel)
-            continue
-        suites = [s for s in root.iter("testsuite") if s.find(".//testsuite") is None]
-        for suite in suites:
+    return roots, refused
+
+
+def _leaf_suites(root) -> list:
+    """Only leaf <testsuite> elements, so a <testsuites> or nested aggregate is not counted twice."""
+    return [s for s in root.iter("testsuite") if s.find(".//testsuite") is None]
+
+
+def parse_junit(cwd: Path, globs: List[str]) -> Optional[dict]:
+    """Counts summed over the JUnit XML reports under `cwd` that match `globs`; None when none could be read.
+
+    Refused files (see _junit_roots) are listed in `skipped_files`.
+    """
+    roots, refused = _junit_roots(cwd, globs)
+    if not roots:
+        return None
+    run = failures = errors = skipped = 0
+    for root in roots:
+        for suite in _leaf_suites(root):
             run += _int(suite.get("tests"))
             failures += _int(suite.get("failures"))
             errors += _int(suite.get("errors"))
             skipped += _int(suite.get("skipped") or suite.get("disabled"))
-        read += 1
-    if not read:
-        return None
     passed = max(run - failures - errors - skipped, 0)
     return {"passed": passed, "failed": failures + errors, "total": passed + failures + errors, "runner": "junit-xml",
-            "files": read, "skipped_files": refused}
+            "files": len(roots), "skipped_files": refused}
+
+
+def junit_cases(cwd: Path, globs: List[str]) -> Optional[dict]:
+    """Every <testcase> of the readable JUnit reports as `classname.name` -> pass, fail or skip (a <failure> or
+    <error> child is fail, a <skipped> child is skip), plus the `file` attribute when the runner writes one; None when
+    no report could be read."""
+    roots, refused = _junit_roots(cwd, globs)
+    if not roots:
+        return None
+    cases: Dict[str, str] = {}
+    files: Dict[str, str] = {}
+    for root in roots:
+        for suite in _leaf_suites(root):
+            for case in suite.iter("testcase"):
+                name = f"{case.get('classname') or suite.get('name') or ''}.{case.get('name') or ''}"
+                if case.find("failure") is not None or case.find("error") is not None:
+                    status = "fail"
+                elif case.find("skipped") is not None:
+                    status = "skip"
+                else:
+                    status = "pass"
+                if cases.get(name) != "fail":  # a retried or duplicated case counts as failing if any run failed
+                    cases[name] = status
+                if case.get("file"):
+                    files[name] = case.get("file") or ""
+    return {"cases": cases, "files": files, "skipped_files": refused}
 
 
 def offline_problem(text: str, alias: str, install_cmd: Optional[List[str]]) -> Optional[str]:
@@ -464,6 +499,7 @@ _SHAPES = {
     "test_cmd": lambda v: v is None or _strs(v),
     "coverage_cmd": lambda v: v is None or _strs(v),
     "install_cmd": lambda v: v is None or _strs(v),
+    "typecheck_cmd": lambda v: v is None or _strs(v),
     "junit": lambda v: _strs(v) and all(_relative_glob(g) for g in v),
     "deps_dirs": _strs,
     "measure": _strs,
@@ -472,7 +508,7 @@ _SHAPES = {
 _SHAPE_HELP = {
     "env": "an object of strings", "pre": "a list of lists of strings", "test_cmd": "a list of strings or null",
     "coverage_cmd": "a list of strings or null", "install_cmd": "a list of strings or null",
-    "junit": "a list of globs relative to the suite folder, without '..'",
+    "typecheck_cmd": "a list of strings or null", "junit": "a list of globs relative to the suite folder, without '..'",
     "deps_dirs": "a list of strings", "measure": "a list of strings", "measured": "true or false",
 }
 
