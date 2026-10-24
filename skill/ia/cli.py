@@ -106,11 +106,18 @@ def _step(args: argparse.Namespace) -> int:
     runmod.set_step(run_dir, args.step, args.state, args.force_open)
     print(f"{args.step}: {args.state}")
     if args.step == "proof" and args.state == "done":
-        left = findingsmod.list_lines(findingsmod.load_all(run_dir), "correctness", "candidate")
+        open_items = [f for f in findingsmod.load_all(run_dir) if f.get("exclude") != "duplicate"]
+        left = findingsmod.list_lines(open_items, "correctness", "candidate")
         if left:
             print(f"warning: proof is done but {len(left)} correctness findings are still candidates (not proven, not "
                   "discarded); they stay out of the reports unless confirmed:\n  " + "\n  ".join(left), file=sys.stderr)
     return OK
+
+
+def _warn_masked(fid: str, fields: List[str]) -> None:
+    if fields:
+        print(f"warning: {fid}: masked a 40-char token that does not look like a code identifier in "
+              f"{', '.join(fields)}; check the stored text", file=sys.stderr)
 
 
 def _finding(args: argparse.Namespace) -> int:
@@ -125,9 +132,14 @@ def _finding(args: argparse.Namespace) -> int:
                 data = json.loads(raw)
             except ValueError as exc:
                 raise runmod.UsageError(f"{args.file} is not valid JSON: {exc}")
-            print(findingsmod.add(run_dir, data))
+            warnings: List[str] = []
+            fid = findingsmod.add(run_dir, data, warnings)
+            _warn_masked(fid, warnings)
+            print(fid)
         elif args.action == "set":
-            findingsmod.update(run_dir, args.id, findingsmod.parse_pairs(args.pairs))
+            warnings = []
+            findingsmod.update(run_dir, args.id, findingsmod.parse_pairs(args.pairs), warnings)
+            _warn_masked(args.id, warnings)
             print(args.id)
         else:
             runmod.load(run_dir)

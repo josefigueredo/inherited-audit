@@ -101,6 +101,10 @@ The step names in backticks are the keys of `manifest.json` `steps`, in order.
 - **Quality report:** deduplicate first; show everything that survives, grouped by repo and by architecture and code;
   anything the contrast refuted (`contrast.verdict=refute`) or that is `discarded` or `unverified` stays out. "Start
   here" lists the 3 to 5 with the most impact per effort.
+- **Duplicates (both reports):** a finding that repeats another one is merged, not discarded: `ia.py finding set
+  --run <run-dir> C-56 exclude=duplicate duplicate_of=C-49` (both fields in one call; the target must exist, be in
+  the same report and not be a duplicate itself). Keep its verdict and its evidence; move anything it adds to the
+  target. The filter hides it and "How it was done" says how many duplicates were merged.
 - Nothing is deleted: the data keeps every finding, and the reports say "N of M shown".
 
 ## Prose (`prose`)
@@ -116,7 +120,9 @@ pass before closing.
 - Before handing over branches: no 40-character identifiers that secret scanners mistake for secrets; no local tool
   files (`.serena/`, `.idea/`, and similar); action SHAs match the version in their comment; no secret in tests,
   fixtures or saved raw outputs.
-- After rendering: no unmasked secret in the reports (`ia.py hygiene` scans `<run>/*.html`).
+- After rendering: no unmasked secret in the reports (`ia.py hygiene` scans `<run>/*.html`), including the value
+  behind a secret-named key in a snippet's context lines (`${API_TOKEN:default}`, `password: ...` in a config file).
+  Render masks those already; a hit means the HTML was edited or rendered by an older version: render again.
 
 ## Branches
 

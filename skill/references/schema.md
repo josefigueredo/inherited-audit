@@ -113,12 +113,17 @@ A `confirmed` one with `docs` confidence needs neither. `unverified` ones stay `
 | `prod_files` | production files the proposal touches (top-level relative); publish uses them to group PRs |
 | `outputs` | `{"red": "outputs/C-07-red.txt", "green": "", "suite": ""}`: raw output saved in the run dir. `red` is the red-test output of each code finding; `suite` is only for supply-chain, container and command-proven security findings (the command's output). `green` and a per-finding `suite` for code findings are legacy (kept, never written) |
 | `contrast` | `{"model": "...", "same_family": false, "verdict": "agree", "scope": "", "rebutted": false, "note": "...", "rebuttal": ""}`; `verdict` is `agree`, `refute`, `unsure` or empty. `scope` (only meaningful on `refute`) is `severity` (the finding is real, the severity is wrong: you lower it and the finding stays visible), `finding` (the finding itself does not hold) or empty (old data: treated as `finding`). `rebutted` is `true` when you checked a `finding` refute against the code and it does not hold: the finding stays visible. `note` is the contrast model's note and is never overwritten; `rebuttal` (a string, masked like prose) is the orchestrator's answer, and the report prints both (an old rebutted finding with an empty `rebuttal` prints `note` as the rebuttal). Old findings without `scope`, `rebutted` or `rebuttal` still load and validate |
-| `exclude` | `refactor`, `feature`, `tooling`, `doubtful`, `no-code` or empty (correctness only; see the rubric) |
+| `exclude` | `refactor`, `feature`, `tooling`, `doubtful`, `no-code` (correctness only; see the rubric), `duplicate` (both reports) or empty |
+| `duplicate_of` | with `exclude=duplicate` only: the id of the finding this one repeats, in the same report and not itself a duplicate (`ia.py finding set --run DIR C-56 exclude=duplicate duplicate_of=C-49`, both in one call). The filter hides it, keeps its verdict and the report counts it as merged, not discarded |
 | `shown` | set by `ia.py filter`: `true` when the finding goes into its report; never set it by hand |
 | `audience` | `{"title": "", "what_happens": "", "fix_summary": ""}`: owner-team prose written in step `prose`; the reports prefer it over the technical fields |
 
 Change fields with dotted keys and JSON values, for example
 `ia.py finding set --run DIR C-07 contrast.model=<model> contrast.verdict=agree contrast.same_family=true`.
+
+`finding add` and `finding set` mask the prose fields on write (secrets, key blocks, URL credentials, the value behind
+a secret-named key). A 40-character code identifier (camelCase, snake_case) stays as written; any other 40-character
+token is masked and the command prints a warning naming the field, so check the stored text.
 
 ## manifest.json
 

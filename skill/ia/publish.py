@@ -93,12 +93,12 @@ def pr_groups(items: List[dict]) -> List[List[dict]]:
 
 def _title(f: dict) -> str:
     aud = f.get("audience") if isinstance(f.get("audience"), dict) else {}
-    return hygienemod.mask_text(str(aud.get("title") or f.get("title") or f["id"]))
+    return hygienemod.mask_text(str(aud.get("title") or f.get("title") or f["id"]), prose=True)
 
 
 def _issue_body(f: dict) -> str:
     aud = f.get("audience") if isinstance(f.get("audience"), dict) else {}
-    prose = hygienemod.mask_text(str(aud.get("what_happens") or f.get("what_happens") or ""))
+    prose = hygienemod.mask_text(str(aud.get("what_happens") or f.get("what_happens") or ""), prose=True)
     lines = [f"# {_title(f)}", "", prose, "", "Evidence:", ""]
     lines += [f"- {e['cite']}" for e in f.get("evidence") or [] if isinstance(e, dict) and e.get("cite")]
     return "\n".join(lines) + "\n"
@@ -111,7 +111,7 @@ def _pr_title(group: List[dict]) -> str:
 
 def _proposal(f: dict) -> str:
     aud = f.get("audience") if isinstance(f.get("audience"), dict) else {}
-    return " ".join(hygienemod.mask_text(str(aud.get("fix_summary") or f.get("fix_summary") or "")).split())
+    return " ".join(hygienemod.mask_text(str(aud.get("fix_summary") or f.get("fix_summary") or ""), prose=True).split())
 
 
 def _pr_static_body(group: List[dict], shared: List[str]) -> str:
