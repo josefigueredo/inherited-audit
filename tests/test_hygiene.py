@@ -455,6 +455,7 @@ class NamedSecretTest(unittest.TestCase):
                      "- key: DB_HOST", "key-store-type: PKCS12", "keycloak: realm", "cache-key-prefix: users",
                      "primaryKey: id", "token-header-name: X-API-Token", "password: ****",
                      "password: <your-password>", "api-key: $API_KEY", "tokenizer: standard",
+                     'password: "********"', "token = '*****'",
                      'const val API_TOKEN_SOURCE_ATTRIBUTE = "apiTokenSource"', 'TOKEN_CLAIM = "sub"'):
             self.assertEqual(hygiene.mask_named(line, config=True), line)
 
@@ -555,6 +556,17 @@ class FixRunTest(unittest.TestCase):
         write_tree(run, {"outputs/a.txt": evidence})
         self.assertEqual(hygiene.fix_run(run), [])
         self.assertEqual((run / "outputs" / "a.txt").read_text(encoding="utf-8"), evidence)
+
+    def test_fix_never_rewrites_runnable_files_but_still_reports_them(self):
+        run = make_dir()
+        files = {"outputs/e2e/docker-compose.yml": "test: mongosh -u root -p ${MONGO_PASSWORD:-" + DEFAULT + "}\n",
+                 "outputs/e2e/up.sh": "export DB_PASSWORD=" + DEFAULT + "\n",
+                 "outputs/e2e/Dockerfile": "ENV API_TOKEN=" + DEFAULT + "\n"}
+        write_tree(run, files)
+        self.assertEqual(hygiene.fix_run(run), [])
+        for rel, text in files.items():
+            self.assertEqual((run / rel).read_text(encoding="utf-8"), text)
+        self.assertEqual(len(hygiene.check_outputs(run)), 3)
 
     def test_binary_files_are_never_rewritten_and_still_reported(self):
         run = self.make()
