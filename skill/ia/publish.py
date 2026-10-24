@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import shlex
+import subprocess
 from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -26,6 +27,27 @@ HEADER = "# Prepared by inherited-audit. Review before running. Nothing here has
 BASE_BRANCH = "main"
 DRAFT_NOTE = ("This branch only adds a failing test that reproduces the issue; it is meant to fail until a fix "
               "lands.")
+# Labels as auditing-repos applies them: from report and dimension, plus ci for workflow findings.
+LABELS = {("correctness", "bug"): ("bug",), ("correctness", "race"): ("bug",),
+          ("correctness", "distributed"): ("bug", "resilience"), ("correctness", "security"): ("security",),
+          ("correctness", "container"): ("security",), ("correctness", "supply-chain"): ("security", "supply-chain"),
+          ("quality", "architecture"): ("architecture",), ("quality", "code"): ("clean-code",),
+          ("quality", "docs"): ("documentation",), ("quality", "resilience"): ("resilience",),
+          ("quality", "tests"): ("testing",)}
+LABEL_ORDER = ("bug", "security", "supply-chain", "resilience", "architecture", "clean-code", "testing", "ci",
+               "documentation")
+LABEL_DEFS = {"bug": ("d73a4a", "Something isn't working"),
+              "security": ("b60205", "Security or hardening concern"),
+              "supply-chain": ("5319e7", "Dependency, lock, or build provenance"),
+              "resilience": ("0e8a16", "Operational robustness in production"),
+              "architecture": ("1d76db", "Structural or design shape"),
+              "clean-code": ("0075ca", "Clean code and refactoring"),
+              "testing": ("fbca04", "Tests, coverage, or quality gates"),
+              "ci": ("c2e0c6", "Continuous integration and workflows"),
+              "documentation": ("0075ca", "Improvements or additions to documentation")}
+CONVENTIONAL = re.compile(r"^(feat|fix|test|docs|refactor|perf|build|ci|chore|style|revert)(\([\w./-]+\))?!?: \S")
+# commitlint config-conventional header-max-length: a squash merge turns the PR title into the commit header.
+MAX_TITLE = 100
 _REMOTE = re.compile(r"^https?://(?:[^/@]*@)?([^/@]+)/([^/]+)/([^/]+?)(?:\.git)?/?$")
 
 
@@ -89,6 +111,25 @@ def route(f: dict, repos: Dict[str, dict]) -> Tuple[str, str]:
                    "another repo)")
 
 
+def labels(f: dict) -> List[str]:
+    """The labels of a finding's issue, in LABEL_ORDER."""
+    out = set(LABELS.get((f.get("report"), f.get("dimension")), ()))
+    cites = [str(e.get("cite") or "") for e in f.get("evidence") or [] if isinstance(e, dict)]
+    if re.match(r"CI\b", str(f.get("title") or "")) or any(".github/workflows/" in c for c in cites):
+        out.add("ci")
+    return [name for name in LABEL_ORDER if name in out]
+
+
+def _pr_labels(group: List[dict]) -> List[str]:
+    """Every member's labels plus testing: the branch only adds a test."""
+    out = {name for f in group for name in labels(f)} | {"testing"}
+    return [name for name in LABEL_ORDER if name in out]
+
+
+def _label_flag(names: List[str]) -> str:
+    return f" --label {shlex.quote(','.join(names))}" if names else ""
+
+
 def _files(f: dict) -> List[str]:
     paths = [t.get("path") for t in f.get("tests") or [] if isinstance(t, dict) and t.get("path")]
     return sorted(set(paths + [p for p in f.get("prod_files") or [] if p]))
@@ -141,9 +182,34 @@ def _issue_body(f: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _pr_title(group: List[dict]) -> str:
-    title = _title(group[0])
-    return title if len(group) == 1 else f"{title} (+{len(group) - 1} more)"
+def cut_title(title: str) -> str:
+    """`title` within MAX_TITLE characters, cut at a word boundary with an ellipsis."""
+    if len(title) <= MAX_TITLE:
+        return title
+    return title[:MAX_TITLE - 1].rsplit(" ", 1)[0] + "\u2026"
+
+
+def _subject(f: dict, repo: Optional[dict]) -> str:
+    """The subject of the finding's red-test commit when it is a conventional commit; "" otherwise (read-only git)."""
+    sha = f.get("sha_test") or ""
+    if not sha or not repo:
+        return ""
+    try:
+        res = subprocess.run(["git", "-C", repo["path"], "log", "-1", "--format=%s", sha], capture_output=True,
+                             text=True, errors="replace", stdin=subprocess.DEVNULL)
+    except (OSError, ValueError):
+        return ""
+    subject = res.stdout.strip() if res.returncode == 0 else ""
+    return subject if CONVENTIONAL.match(subject) else ""
+
+
+def _pr_title(group: List[dict], repo: Optional[dict]) -> str:
+    """The conventional subject of the first member's red-test commit (`test: <title>` without one); a group keeps
+    " (+N more)" only while it fits MAX_TITLE."""
+    subject = _subject(group[0], repo)
+    title = hygienemod.mask_text(subject, prose=True) if subject else f"test: {_title(group[0])}"
+    more = f" (+{len(group) - 1} more)" if len(group) > 1 else ""
+    return title + more if more and len(title) + len(more) <= MAX_TITLE else cut_title(title)
 
 
 def _proposal(f: dict) -> str:
@@ -180,7 +246,8 @@ def _issue_lines(f: dict, repo: Optional[dict], body: Path) -> Tuple[List[str], 
     var = _var(f["id"])
     # The assignment carries gh's exit status (set -e stops on a failure); then keep the number after the last '/'.
     return [_comment(f"{f['id']}: {_title(f)}"),
-            f"{var}=$(gh issue create --repo {q(target)} --title {q(_title(f))} --body-file {q(str(body))})",
+            f"{var}=$(gh issue create --repo {q(target)} --title {q(_title(f))}{_label_flag(labels(f))} "
+            f"--body-file {q(str(body))})",
             f"{var}=${{{var}##*/}}",
             f'echo "{f["id"]} -> issue #${{{var}}}"'], True
 
@@ -217,8 +284,24 @@ def _pr_lines(n: int, group: List[dict], repo: Optional[dict], out: Path, create
     lines.append(_comment(f"a draft: the branch only adds the failing test; replace {BASE_BRANCH} with the repo's "
                           "default branch if it differs"))
     lines.append(f"gh pr create --draft --repo {q(target)} --head {q(head)} --base {BASE_BRANCH} "
-                 f"--title {q(_pr_title(group))} --body-file {q(str(final))}")
+                 f"--title {q(_pr_title(group, repo))}{_label_flag(_pr_labels(group))} --body-file {q(str(final))}")
     return lines
+
+
+def _label_lines(used: Dict[str, List[str]]) -> List[str]:
+    """One `gh label create` per label and target repo, before any issue: a label missing halfway would stop the
+    script after some issues exist, and running it again duplicates them. `|| true` keeps a label the repo already has;
+    no --force, so the team's colors stay."""
+    if not used:
+        return []
+    q = shlex.quote
+    lines = [_comment("Labels first, each one this file uses, per repo; one that already exists is left as it is.")]
+    for target, names in used.items():
+        for name in [n for n in LABEL_ORDER if n in names]:
+            color, desc = LABEL_DEFS[name]
+            lines.append(f"gh label create {q(name)} --repo {q(target)} --color {color} --description {q(desc)} "
+                         "|| true")
+    return lines + [""]
 
 
 def prepare_publish(run: Path) -> Path:
@@ -247,21 +330,34 @@ def prepare_publish(run: Path) -> Path:
         cmds += [_comment(f"WARNING: the remote of {', '.join(aliases)} carries credentials; they were dropped here and "
                           "never copied into this file. Rotate that credential and remove it from the remote URL."), ""]
     created: set = set()
+    used: Dict[str, List[str]] = {}
+
+    def use(repo: Optional[dict], names: List[str]) -> None:
+        target = gh_repo(repo.get("remote", "")) if repo else None
+        if target:
+            used.setdefault(target, [])
+            used[target] += [n for n in names if n not in used[target]]
+
+    body_cmds: List[str] = []
     for f in shown:
         body = out / f"issue-{f['id']}.md"
         body.write_text(_issue_body(f), encoding="utf-8")
         alias, note = route(f, repos)
         lines, ok = _issue_lines(f, repos.get(alias), body)
-        cmds += ([_comment(note)] if note else []) + lines
+        body_cmds += ([_comment(note)] if note else []) + lines
         if ok:
             created.add(f["id"])
+            use(repos.get(alias), labels(f))
     groups = pr_groups(items)
     keys_of = [{k for f in g for k in _keys(f)} for g in groups]
     for n, group in enumerate(groups, 1):
         others = set().union(*[s for i, s in enumerate(keys_of) if i != n - 1]) if len(groups) > 1 else set()
         shared = sorted(p for _, p in keys_of[n - 1] & others)
         (out / f"pr-{n}.md").write_text(_pr_static_body(group, shared), encoding="utf-8")
-        cmds.append("")
-        cmds += _pr_lines(n, group, repos.get(route(group[0], repos)[0]), out, created)
+        repo = repos.get(route(group[0], repos)[0])
+        body_cmds.append("")
+        body_cmds += _pr_lines(n, group, repo, out, created)
+        use(repo, _pr_labels(group))
+    cmds += _label_lines(used) + body_cmds
     (out / "commands.sh").write_text("\n".join(cmds) + "\n", encoding="utf-8")
     return out

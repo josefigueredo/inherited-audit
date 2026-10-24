@@ -59,7 +59,7 @@ Not for:
 
 | Option | Default | Effect |
 |---|---|---|
-| `publish` | `false` | With `true`, at the end `ia.py publish` writes issue and PR bodies and the exact `gh` commands. It never runs them. |
+| `publish` | `false` | With `true`, at the end `ia.py publish` writes issue and PR bodies and the exact `gh` commands (labels from each dimension, conventional PR titles, no LLM attribution: hygiene checks it). It never runs them. |
 
 Ask only if the person did not say. It maps to `ia.py init --publish`. The skill never applies a fix: every confirmed
 correctness finding stops at a branch with the red test (commit 1, tests only) and the written proposal in

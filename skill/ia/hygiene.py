@@ -71,6 +71,28 @@ R_SECRET = "possible secret"
 R_CRED = "credentials in a URL"
 R_KEY = "possible key material"
 R_NAMED = "value of a secret-named key"
+R_ATTRIBUTION = "LLM attribution"
+
+# The pattern of auditing-repos' check-attribution.sh: attribution phrases, never a bare vendor word. "cursor" counts
+# only in a trailer or as "with/by Cursor [Agent]" ending the clause, because it is also a pagination word.
+_VENDOR = (r"(?:claude|anthropic|copilot|codex|chatgpt|gpt-[0-9]|openai|gemini|llama|mistral|grok|deepseek|qwen|llm"
+           r"|\bai\b)")
+_VENDOR_OR_CURSOR = _VENDOR[:-1] + r"|cursor)"
+ATTRIBUTION = re.compile("|".join((
+    r"co[- ]authored[- ]by:[^\n]*" + _VENDOR_OR_CURSOR,
+    r"(?:generated|created|written|authored|produced|assisted)[ -]?(?:with|by)[^\n]{0,24}" + _VENDOR,
+    r"(?:generated|created|written|authored|produced|assisted)[ -]?(?:with|by)\s+cursor(?:\s+(?:agent|ai|ide))?"
+    r"(?=\s*(?:[.,;:!)]|$))",
+    "\U0001F916|:robot:",
+    r"(?:this|the) (?:pr|commit|change|issue|report)[^\n]{0,40}" + _VENDOR + r"[^\n]{0,20}(?:wrote|generated|authored)",
+    r"noreply@anthropic\.com",
+)), re.I | re.M)
+# A commit author or committer that is a tool, not a person: exact tool names (a person called Claude Dupont passes)
+# and the tools' own addresses.
+TOOL_NAME = re.compile(r"^(?:github[- ])?(?:claude(?: code)?|anthropic|copilot(?:-swe-agent)?|cursor(?: agent)?|chatgpt"
+                       r"|codex|openai|gemini)(?:\[bot\])?$", re.I)
+TOOL_EMAIL = re.compile(r"@(?:anthropic\.com|openai\.com|cursor\.(?:com|sh))$"
+                        r"|^(?:\d+\+)?(?:copilot|claude|cursor|chatgpt)[\w.-]*@users\.noreply\.github\.com$", re.I)
 
 
 def _mask(match: "re.Match[str]") -> str:
@@ -270,6 +292,42 @@ def _token_hit(line: str) -> bool:
     return any(not HEX40.fullmatch(t) for t in TOKEN40.findall(text))
 
 
+def attribution_hit(text: str) -> str:
+    """The first line of `text` carrying LLM attribution, stripped and cut; "" when there is none."""
+    m = ATTRIBUTION.search(text)
+    if not m:
+        return ""
+    start = text.rfind("\n", 0, m.start()) + 1
+    end = text.find("\n", m.end())
+    return text[start:end if end != -1 else len(text)].strip()[:EXCERPT]
+
+
+def attribution_identity(name: str, email: str) -> bool:
+    return bool(TOOL_NAME.match(name.strip()) or TOOL_EMAIL.search(email.strip()))
+
+
+def _attribution_in_commits(repo: Path, base: str, branch: str) -> List[str]:
+    """Commits `base..branch` whose message, author or committer is attribution to a tool."""
+    log = _git(repo, "log", "--format=%H%x00%an%x00%ae%x00%cn%x00%ce%x00%B%x1e", f"{base}..{branch}")
+    if log.returncode != 0:
+        raise runmod.ToolError(f"git log {base}..{branch} failed in {repo}: {log.stderr.strip()}")
+    out: List[str] = []
+    for record in log.stdout.split("\x1e"):
+        parts = record.strip("\n").split("\x00")
+        if len(parts) != 6:
+            continue
+        sha, an, ae, cn, ce, message = parts
+        where = f"{branch}: {R_ATTRIBUTION}: commit {sha[:7]}"
+        if attribution_identity(an, ae):
+            out.append(f"{where} author {an}")
+        if attribution_identity(cn, ce):
+            out.append(f"{where} committer {cn}")
+        hit = attribution_hit(message)
+        if hit:
+            out.append(f"{where} message: {hit}")
+    return out
+
+
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     try:
         return subprocess.run(["git", *args], cwd=str(repo), capture_output=True, text=True, errors="replace",
@@ -295,6 +353,7 @@ def scan_branch(repo: Path, base: str, branch: str) -> Tuple[List[str], List[str
     for path in names.stdout.splitlines():
         if _is_tooling(path):
             problems.append(f"{branch}: {R_TOOLING}: {path[:EXCERPT]}")
+    problems += _attribution_in_commits(repo, base, branch)
     diff = _git(repo, "diff", "--no-color", "-U0", f"{base}...{branch}")
     if diff.returncode != 0:
         raise runmod.ToolError(f"git diff {base}...{branch} failed in {repo}: {diff.stderr.strip()}")
@@ -442,13 +501,21 @@ def check_reports(run: Path) -> List[str]:
 
 
 def check_publish(run: Path) -> List[str]:
-    """Prepared publish files (`<run>/publish/*`) must carry no secret and no credentialed URL."""
+    """Prepared publish files (`<run>/publish/*`) must carry no secret and no credentialed URL; bodies (`*.md`) and
+    scripts (`*.sh`) no LLM attribution either."""
     out: List[str] = []
     root = Path(run) / "publish"
     if not root.is_dir():
         return out
     for path in sorted(p for p in root.rglob("*") if p.is_file()):
-        out += _scan_file(path, path.relative_to(Path(run)).as_posix())
+        rel = path.relative_to(Path(run)).as_posix()
+        out += _scan_file(path, rel)
+        if path.suffix in (".md", ".sh"):
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            out += [f"{rel}: {R_ATTRIBUTION}: {hit}" for hit in filter(None, map(attribution_hit, text.splitlines()))]
     return out
 
 
