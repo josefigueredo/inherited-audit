@@ -123,6 +123,8 @@ pass before closing.
 - After rendering: no unmasked secret in the reports (`ia.py hygiene` scans `<run>/*.html`), including the value
   behind a secret-named key in a snippet's context lines (`${API_TOKEN:default}`, `password: ...` in a config file).
   Render masks those already; a hit means the HTML was edited or rendered by an older version: render again.
+- The same secret-named check (without the bare `key: value` rule, which is only for config files) runs on saved
+  outputs, finding files and publish files: mask the value in the file, or set the field again with `finding set`.
 
 ## Branches
 

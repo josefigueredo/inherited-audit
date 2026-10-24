@@ -42,14 +42,17 @@ MASTER_PARTNERS = {"value", "key", "token", "secret", "password"}
 NOT_SECRET_TAIL = {"ttl", "expiration", "expiry", "expires", "length", "size", "timeout", "type", "uri", "url",
                    "endpoint", "header", "name", "policy", "enabled", "enable", "path", "file", "location", "source",
                    "prefix", "format", "algorithm", "alg", "validity", "duration", "issuer", "audience", "count", "max",
-                   "min", "store", "id", "mode", "env", "var", "field", "param", "required", "regex", "pattern"}
+                   "min", "store", "id", "mode", "env", "var", "field", "param", "required", "regex", "pattern", "attribute",
+                   "attr", "claim", "label", "column", "property"}
 CONFIG_SUFFIXES = (".yml", ".yaml", ".properties", ".env", ".conf", ".cfg", ".ini", ".toml")
 _NAME = r"[A-Za-z_][A-Za-z0-9_.-]*"
 PLACEHOLDER = re.compile(r"\$\{(" + _NAME + r")(:-?)([^}]*)\}")
-QUOTED = re.compile(r"""(?<![\w.-])(["']?)(""" + _NAME + r""")\1\s*[:=]\s*(["'])(.*?)\3""")
+# QUOTED and BARE are lookaheads, so candidates overlap: in `env: DB_PASSWORD=x` or `{"a": "b {"api_key": "x"}"}`
+# the inner key is seen even though an outer one matched first.
+QUOTED = re.compile(r"""(?<![\w.-])(?=(["']?)(""" + _NAME + r""")\1\s*[:=]\s*(["'])(.*?)\3)""")
 HEADER = re.compile(r"""(?i)(?:-H|--header)\s*["']\s*(""" + _NAME + r""")\s*:\s*(?:(?:bearer|basic)\s+)?([^"'\s]+)""")
 BEARER = re.compile(r"(?i)\bauthorization\s*:\s*(?:bearer|basic)\s+([^\s\"'<>$]+)")
-BARE = re.compile(r"""(?<![\w.${-])(""" + _NAME + r""")\s*([:=])[ \t]*(?!["'])([^\s#;,"'}]+)""")
+BARE = re.compile(r"""(?<![\w.${-])(?=(""" + _NAME + r""")\s*([:=])[ \t]*(?!["'])([^\s#;,"'}]+))""")
 SCREAMING = re.compile(r"[A-Z][A-Z0-9_]*$")
 NOT_SECRET_VALUE = re.compile(r"(?i)(\*{4}|[$<{%].*|\d+(\.\d+)?[a-z]{0,2}|true|false|null|none|nil|~|"
                               r"[a-z][a-z0-9+.-]*://.*)$")
@@ -123,6 +126,18 @@ def _hides(value: str) -> bool:
     return bool(value) and not NOT_SECRET_VALUE.match(value)
 
 
+def _mask_spans(text: str, pattern: "re.Pattern[str]", group: int, hides) -> str:
+    """`text` with group `group` of every (overlapping) match of `pattern` for which `hides(match)` holds masked;
+    replaced right to left, and a span inside one already masked is dropped."""
+    spans = [(m.start(group), m.end(group)) for m in pattern.finditer(text) if hides(m)]
+    last = len(text) + 1
+    for start, end in reversed(spans):
+        if end <= last:
+            text = text[:start] + MASK + text[end:]
+            last = start
+    return text
+
+
 def mask_named(line: str, config: bool = False) -> str:
     """`line` with the value behind every secret-named key masked as `****`: a `${NAME:default}` default, a quoted
     literal, a curl header or bearer token, a `SCREAMING_NAME=value` and, in config files (`config`), any bare
@@ -132,10 +147,8 @@ def mask_named(line: str, config: bool = False) -> str:
             return m.group(0)
         return "${" + m.group(1) + m.group(2) + MASK + "}"
 
-    def quoted(m: "re.Match[str]") -> str:
-        if not secret_name(m.group(2)) or not _hides(m.group(4)):
-            return m.group(0)
-        return m.group(0)[:m.start(4) - m.start(0)] + MASK + m.group(3)
+    def quoted(m: "re.Match[str]") -> bool:
+        return secret_name(m.group(2)) and _hides(m.group(4))
 
     def header(m: "re.Match[str]") -> str:
         if not secret_name(m.group(1)) or not _hides(m.group(2)):
@@ -145,17 +158,15 @@ def mask_named(line: str, config: bool = False) -> str:
     def bearer(m: "re.Match[str]") -> str:
         return m.group(0) if not _hides(m.group(1)) else m.group(0)[:m.start(1) - m.start(0)] + MASK
 
-    def bare(m: "re.Match[str]") -> str:
+    def bare(m: "re.Match[str]") -> bool:
         name, sep, value = m.group(1), m.group(2), m.group(3)
-        if not (config or (sep == "=" and SCREAMING.match(name))) or not secret_name(name) or not _hides(value):
-            return m.group(0)
-        return m.group(0)[:m.start(3) - m.start(0)] + MASK
+        return bool((config or (sep == "=" and SCREAMING.match(name))) and secret_name(name) and _hides(value))
 
     text = PLACEHOLDER.sub(placeholder, line)
-    text = QUOTED.sub(quoted, text)
+    text = _mask_spans(text, QUOTED, 4, quoted)
     text = HEADER.sub(header, text)
     text = BEARER.sub(bearer, text)
-    return BARE.sub(bare, text)
+    return _mask_spans(text, BARE, 3, bare)
 
 
 def has_credentials(url: str) -> bool:
@@ -337,19 +348,25 @@ def _raw_userinfo(line: str) -> bool:
     return False
 
 
-def _scan_file(path: Path, rel: str) -> List[str]:
-    """One problem per secret line; lines inside a private-key block are never echoed, only the BEGIN line."""
+def _scan_file(path: Path, rel: str, named: bool = True) -> List[str]:
+    """One problem per secret line; lines inside a private-key block are never echoed, only the BEGIN line. `named`
+    also flags the value behind a secret-named key (in a JSON file, after unescaping `\\"`); bare `key: value` is
+    not checked here, since these files are not config files."""
     out: List[str] = []
     keys = KeyMasker()
+    unescape = path.suffix == ".json"
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         if keys.inside:
             keys.line(line)
             continue
         keys.line(line)
+        text = line.replace('\\"', '"') if unescape else line
         if _secret_hit(line):
             out.append(f"{rel}: {R_SECRET}: {_excerpt(line)}")
         elif _raw_userinfo(line):
             out.append(f"{rel}: {R_CRED}: {_excerpt(line)}")
+        elif named and mask_named(text) != text:
+            out.append(f"{rel}: {R_NAMED}: {_named_excerpt(text)}")
     return out
 
 
@@ -404,7 +421,7 @@ def check_reports(run: Path) -> List[str]:
     (`${API_TOKEN:default}`, `password: ...` in a config file's snippet)."""
     out: List[str] = []
     for path in sorted(p for p in Path(run).glob("*.html") if p.is_file()):
-        out += _scan_file(path, path.name)
+        out += _scan_file(path, path.name, named=False)  # rows are checked one by one below
         keys = KeyMasker()
         for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
             if keys.inside:
