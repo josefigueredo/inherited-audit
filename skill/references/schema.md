@@ -75,7 +75,7 @@ Applies to every correctness finding except those proven by a command (next tabl
 
 | Field | Meaning |
 |---|---|
-| `branch` | local branch of this finding (no upstream) |
+| `branch` | local branch of this finding (no upstream), in the repo of its **first** `evidence[].cite`: merge-check and publish take that repo as the branch's |
 | `sha_test` | the commit with only tests (red at the base) |
 | `tests` | at least one `{"path": "...", "red": "3 of 3 fail", "green": "", "note": ""}` |
 | `red_reason` | the assertion that fails at the base and why that is the problem, not a setup error |
@@ -115,6 +115,7 @@ A `confirmed` one with `docs` confidence needs neither. `unverified` ones stay `
 | `contrast` | `{"model": "...", "same_family": false, "verdict": "agree", "scope": "", "rebutted": false, "note": "...", "rebuttal": ""}`; `verdict` is `agree`, `refute`, `unsure` or empty. `scope` (only meaningful on `refute`) is `severity` (the finding is real, the severity is wrong: you lower it and the finding stays visible), `finding` (the finding itself does not hold) or empty (old data: treated as `finding`). `rebutted` is `true` when you checked a `finding` refute against the code and it does not hold: the finding stays visible. `note` is the contrast model's note and is never overwritten; `rebuttal` (a string, masked like prose) is the orchestrator's answer, and the report prints both (an old rebutted finding with an empty `rebuttal` prints `note` as the rebuttal). Old findings without `scope`, `rebutted` or `rebuttal` still load and validate |
 | `exclude` | `refactor`, `feature`, `tooling`, `doubtful`, `no-code` (correctness only; see the rubric), `duplicate` (both reports) or empty |
 | `duplicate_of` | with `exclude=duplicate` only: the id of the finding this one repeats, in the same report and not itself a duplicate (`ia.py finding set --run DIR C-56 exclude=duplicate duplicate_of=C-49`, both in one call). The filter hides it, keeps its verdict and the report counts it as merged, not discarded |
+| `publish_repo` | a repo alias of the run (`ia.py finding set` refuses any other): the repo `ia.py publish` sends the issue of a finding **without** a branch to. Empty: the most cited alias (the synthetic ROOT counts only when it is the only one; a tie goes to the first cited of the tied ones), and `publish/commands.sh` flags the choice with a comment when the finding cites more than one repo. Set it when the fix belongs to a repo that is not the most cited. A finding with a branch ignores it (with a comment): its issue goes to the repo of its first cite, so its PR can reference it |
 | `shown` | set by `ia.py filter`: `true` when the finding goes into its report; never set it by hand |
 | `audience` | `{"title": "", "what_happens": "", "fix_summary": ""}`: owner-team prose written in step `prose`; the reports prefer it over the technical fields |
 

@@ -351,5 +351,152 @@ class PublishTest(unittest.TestCase):
         self.assertTrue((run / "publish" / f"issue-{c}.md").read_text(encoding="utf-8").startswith("# For the team\n"))
 
 
+def multi_run(**layout):
+    """A filtered publish run with one repo per alias, each with its own github remote (`o/<alias lowercase>`)."""
+    args = ["init", "--system", "s", "--out", str(make_dir() / "run")]
+    for alias, files in layout.items():
+        repo, _ = make_git_repo(files, remote=f"https://github.com/o/{alias.lower()}")
+        args += ["--repo", f"{alias}={repo}"]
+    assert run_cli(args).returncode == 0
+    run = Path(args[4])
+    manifest = runmod.load(run)
+    manifest["options"]["publish"] = True
+    manifest["filter"] = {"counts": {}, "start_here": []}
+    runmod.save(run, manifest)
+    return run
+
+
+def cites(*aliases):
+    return [{"cite": f"{a}/a.py:1-2", "from": 1, "to": 2, "note": ""} for a in aliases]
+
+
+def add_cross(run, evidence, report="quality", branch="", **extra):
+    base = {"category": "x", "title": "Cross", "verdict": "confirmed", "severity": "low", "confidence": "docs",
+            "source": "t", "what_happens": "It breaks.", "evidence": evidence, **extra}
+    if report == "quality":
+        base.update(report="quality", dimension="code", suggestion="s", effort="S")
+    else:
+        base.update(report="correctness", dimension="bug", branch=branch, prod_files=["a.py"])
+    fid = findingsmod.add(run, base)
+    findingsmod.update(run, fid, {"shown": True})
+    return fid
+
+
+def issue_repo(cmds, fid):
+    line = next(x for x in cmds.splitlines() if x.startswith(f"I_{fid.replace('-', '_')}=$(gh issue create"))
+    return shlex.split(line.split("$(", 1)[1])[4]
+
+
+class PublishRepoTest(unittest.TestCase):
+    """Which repo each issue and PR goes to when a finding cites more than one."""
+
+    def publish(self, run):
+        publish.prepare_publish(run)
+        return (run / "publish" / "commands.sh").read_text(encoding="utf-8")
+
+    def test_unbranched_finding_goes_to_the_most_cited_repo_with_a_review_comment(self):
+        run = multi_run(API={"a.py": "x\n"}, BFF={"a.py": "x\n"}, MCP={"a.py": "x\n"})
+        q = add_cross(run, cites("BFF", "BFF", "MCP", "MCP", "API", "API", "API"))
+        cmds = self.publish(run)
+        self.assertEqual(issue_repo(cmds, q), "o/api")
+        self.assertIn(f"# {q}: cites API 3, BFF 2, MCP 2; goes to API by majority (set publish_repo if the fix "
+                      "belongs to another repo)", cmds)
+
+    def test_tie_goes_to_the_first_cited_of_the_tied_repos(self):
+        run = multi_run(API={"a.py": "x\n"}, BFF={"a.py": "x\n"}, MFE={"a.py": "x\n"})
+        q = add_cross(run, cites("MFE", "BFF", "API", "API", "BFF"))
+        self.assertEqual(issue_repo(self.publish(run), q), "o/bff")
+
+    def test_single_repo_finding_has_no_review_comment(self):
+        run = multi_run(API={"a.py": "x\n"}, BFF={"a.py": "x\n"})
+        q = add_cross(run, cites("BFF", "BFF"))
+        cmds = self.publish(run)
+        self.assertEqual(issue_repo(cmds, q), "o/bff")
+        self.assertNotIn("by majority", cmds)
+
+    def test_root_alias_does_not_count_unless_it_is_the_only_one(self):
+        repo, _ = make_git_repo({"api/a.py": "x\n", "web/a.py": "x\n", "Dockerfile": "x\n"},
+                                remote="https://github.com/o/mono")
+        run = make_dir() / "run"
+        self.assertEqual(run_cli(["init", "--system", "s", "--out", str(run), "--repo", f"API={repo}:api",
+                                  "--repo", f"WEB={repo}:web"]).returncode, 0)
+        manifest = runmod.load(run)
+        self.assertTrue(any(r.get("root") for r in manifest["repos"]))
+        manifest["options"]["publish"] = True
+        manifest["filter"] = {"counts": {}, "start_here": []}
+        runmod.save(run, manifest)
+        q = add_cross(run, cites("ROOT", "ROOT", "ROOT", "WEB", "API", "WEB"))
+        only_root = add_cross(run, cites("ROOT", "ROOT"))
+        cmds = self.publish(run)
+        self.assertIn(f"# {q}: cites WEB 2, API 1; goes to WEB by majority", cmds)
+        self.assertEqual(issue_repo(cmds, only_root), "o/mono")
+        self.assertNotIn(f"# {only_root}: cites", cmds)
+
+    def test_publish_repo_wins_without_a_review_comment(self):
+        run = multi_run(API={"a.py": "x\n"}, BFF={"a.py": "x\n"})
+        q = add_cross(run, cites("BFF", "API", "API"), publish_repo="BFF")
+        cmds = self.publish(run)
+        self.assertEqual(issue_repo(cmds, q), "o/bff")
+        self.assertNotIn(f"# {q}: cites", cmds)
+
+    def test_publish_repo_must_be_a_repo_of_the_run(self):
+        run = multi_run(API={"a.py": "x\n"}, BFF={"a.py": "x\n"})
+        with self.assertRaises(findingsmod.FindingError) as ctx:
+            add_cross(run, cites("API"), publish_repo="NOPE")
+        self.assertIn("publish_repo", str(ctx.exception))
+        q = add_cross(run, cites("API"))
+        with self.assertRaises(findingsmod.FindingError) as ctx:
+            findingsmod.update(run, q, {"publish_repo": "NOPE"})
+        self.assertIn("API, BFF", str(ctx.exception))
+        self.assertEqual(findingsmod.update(run, q, {"publish_repo": "BFF"})["publish_repo"], "BFF")
+        result = run_cli(["finding", "set", "--run", str(run), q, "publish_repo=NOPE"])
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("publish_repo", result.stderr)
+
+    def test_branched_finding_goes_to_its_branch_repo_not_the_majority(self):
+        run = multi_run(API={"a.py": "x\n"}, BFF={"a.py": "x\n"}, MFE={"a.py": "x\n"})
+        c = add_cross(run, cites("MFE", "API", "API", "API", "MFE", "BFF"), report="correctness", branch="fix/c")
+        cmds = self.publish(run)
+        self.assertEqual(issue_repo(cmds, c), "o/mfe")
+        self.assertIn("gh pr create --draft --repo o/mfe --head fix/c", cmds)
+        self.assertNotIn("by majority", cmds)
+
+    def test_publish_repo_on_a_branched_finding_is_ignored_with_a_comment(self):
+        run = multi_run(API={"a.py": "x\n"}, MFE={"a.py": "x\n"})
+        c = add_cross(run, cites("MFE", "API"), report="correctness", branch="fix/c", publish_repo="API")
+        cmds = self.publish(run)
+        self.assertEqual(issue_repo(cmds, c), "o/mfe")
+        self.assertIn(f"# {c}: publish_repo API ignored: its branch fix/c is in MFE (the first cite), and the PR "
+                      "can only reference an issue of its own repo", cmds)
+
+    def test_group_of_branched_findings_shares_the_branch_repo(self):
+        run = multi_run(API={"a.py": "x\n"}, MFE={"a.py": "x\n"})
+        a = add_cross(run, cites("MFE", "API", "API"), report="correctness", branch="fix/a")
+        b = add_cross(run, cites("MFE", "API", "API", "API"), report="correctness", branch="fix/b")
+        groups = publish.pr_groups(findingsmod.load_all(run))
+        self.assertEqual([[f["id"] for f in g] for g in groups], [[a, b]])
+        cmds = self.publish(run)
+        self.assertEqual({issue_repo(cmds, a), issue_repo(cmds, b)}, {"o/mfe"})
+        self.assertIn("gh pr create --draft --repo o/mfe --head audit/pr-1", cmds)
+
+    def test_each_created_issue_prints_its_number(self):
+        run = multi_run(API={"a.py": "x\n"}, BFF={"a.py": "x\n"})
+        q = add_cross(run, cites("API"))
+        c = add_cross(run, cites("BFF"), report="correctness", branch="fix/c")
+        cmds = self.publish(run)
+        self.assertIn(f'echo "{q} -> issue #${{I_{q.replace("-", "_")}}}"', cmds)
+        stubs = make_dir()
+        (stubs / "gh").write_text('#!/bin/sh\ncase "$1 $2" in "issue create") '
+                                  'echo "https://github.com/o/r/issues/7";; esac\n')
+        (stubs / "git").write_text("#!/bin/sh\n")
+        for name in ("gh", "git"):
+            (stubs / name).chmod(0o755)
+        res = subprocess.run(["sh", str(run / "publish" / "commands.sh")], capture_output=True, text=True,
+                             env={**os.environ, "PATH": f"{stubs}:/usr/bin:/bin"}, cwd=str(make_dir()))
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn(f"{q} -> issue #7\n", res.stdout)
+        self.assertIn(f"{c} -> issue #7\n", res.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -43,7 +43,7 @@ Las pasadas propias están en [`skill/references/passes/`](../skill/references/p
 
 | Opción | Por defecto | Qué hace |
 |---|---|---|
-| `publish` | apagada | Al final, después de `filter`, `ia.py publish` escribe cuerpos de issues y PRs y `publish/commands.sh` con los comandos `gh` exactos (cada uno con `--repo`; los PRs salen en borrador y referencian el issue sin cerrarlo; el push queda comentado). Nunca los corre |
+| `publish` | apagada | Al final, después de `filter`, `ia.py publish` escribe cuerpos de issues y PRs y `publish/commands.sh` con los comandos `gh` exactos (cada uno con `--repo`; los PRs salen en borrador y referencian el issue sin cerrarlo; el push queda comentado; cada issue creado imprime su número). Un hallazgo con rama manda su issue al repo de su rama (su primera cita), el mismo de su PR; uno sin rama, al de `publish_repo` si lo tiene, si no al repo más citado, con un comentario en `commands.sh` para revisarlo cuando cita varios. Nunca los corre |
 
 ## La carpeta de una corrida
 
