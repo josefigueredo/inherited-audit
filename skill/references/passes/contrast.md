@@ -55,6 +55,8 @@ codex exec -s read-only --skip-git-repo-check -o <file> "<prompt>" < /dev/null
 ```
 
 The answer is in `<file>`; the model name is the `model:` line of the log header Codex prints, not part of `<file>`.
+Cursor's `agent` prints no model: record the `--model` id you passed, with the note
+`(requested; Cursor does not report it)`.
 On Cursor: `agent -p --mode ask --trust --workspace <dir> --model <other-model> --output-format json`. Details, and
 where the full log goes: `references/workers.md`.
 

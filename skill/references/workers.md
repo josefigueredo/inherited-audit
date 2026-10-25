@@ -83,6 +83,10 @@ subagent read-only.
 - `--trust` is needed the first time `agent` runs in a folder. Without it, a print-mode run in a folder it has not seen
   prints "Workspace Trust Required" and exits 1 without an answer (measured on a fresh `fix/wt-*` worktree). It only
   trusts the folder; `--mode ask` is what keeps the run read-only.
+- The answer is the `result` field of the JSON. The JSON names no model: it has `result`, `session_id`,
+  `request_id`, `usage` and timings, and no model field (measured on a fix review). Record the id passed to `--model`
+  with a note that it was requested, for example `gemini-3.1-pro (requested; Cursor does not report it)`. `fix done`
+  compares only the id before the note with `contrast.model`.
 
 The wshobson/agents install is Cursor's own `/add-plugin` from the Cursor 2.5+ plugin marketplace (wshobson/agents,
 `docs/harnesses.md`); `/plugin marketplace add` is the Claude Code command and does not apply here.

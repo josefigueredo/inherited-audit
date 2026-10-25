@@ -56,5 +56,8 @@ Return JSON only:
 ```
 
 Your own `model` value is not trusted. The orchestrator replaces it with the model the CLI reports: for Codex, the
-`model:` line of the log header. The orchestrator records it with
+`model:` line of the log header. Cursor's `agent` reports no model: its JSON has `result`, `session_id`,
+`request_id`, `usage` and timings, and no model field (measured on a fix review). For Cursor, record the model id it was
+asked for, with a note that it was requested, for example
+`gemini-3.1-pro (requested; Cursor does not report it)`. The orchestrator records it with
 `python3 <ia> finding set --run <run> <id> 'fix.review=<that JSON>'`.
