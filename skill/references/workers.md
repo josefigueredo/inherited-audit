@@ -69,7 +69,7 @@ CC-BY-SA-4.0).
 | unit-tests | obra/superpowers | `/add-plugin superpowers` | `references/passes/unit-tests.md` |
 | e2e | Playwright | (use the project's own Playwright, or add it to the tests branch) | `references/passes/e2e-infra.md` |
 | quality | wshobson/agents (c4-architecture, comprehensive-review) | `/add-plugin (Cursor 2.5+ marketplace: https://github.com/wshobson/agents)` | `references/passes/quality-lenses.md` |
-| contrast | agent -p --mode ask --model <other-model> --output-format json | (Cursor's `agent` CLI; nothing to install when it is on the PATH) | `references/passes/contrast.md` |
+| contrast | agent -p --mode ask --trust --workspace <dir> --model <other-model> --output-format json | (Cursor's `agent` CLI; nothing to install when it is on the PATH) | `references/passes/contrast.md` |
 | proof | own pass | (none) | `references/passes/red-test-proof.md` |
 | verify | own pass | (none) | `references/passes/verify-high.md` |
 | prose | own pass | (none) | `references/passes/owner-prose.md` |
@@ -78,6 +78,11 @@ For the Cursor contrast row, `<other-model>` is a model of a different family fr
 the prompt is the contrast pass with the run dir. `ask` mode is read-only, which is what the contrast needs. The same
 invocation (with the model chosen for the pass) is how Cursor runs every **analysis pass** in a terminal: it keeps the
 subagent read-only.
+
+- `--workspace <dir>` is the folder the model reads: the worktree at the commit under review, or the run dir.
+- `--trust` is needed the first time `agent` runs in a folder. Without it, a print-mode run in a folder it has not seen
+  prints "Workspace Trust Required" and exits 1 without an answer (measured on a fresh `fix/wt-*` worktree). It only
+  trusts the folder; `--mode ask` is what keeps the run read-only.
 
 The wshobson/agents install is Cursor's own `/add-plugin` from the Cursor 2.5+ plugin marketplace (wshobson/agents,
 `docs/harnesses.md`); `/plugin marketplace add` is the Claude Code command and does not apply here.
@@ -98,6 +103,16 @@ codex exec -s read-only --skip-git-repo-check -o <file> "<prompt>" < /dev/null
   `-o <file>` writes the final answer to `<file>` (measured: `say ok` left `ok` in the file).
 - The model name is **not** in `<file>`. It is in the log header Codex prints on stderr/stdout before the answer, the
   line `model: <name>`. Read it from there for `contrast.model`.
+
+## Where a reviewer's log goes
+
+The full log of a CLI reviewer (Codex's stdout and stderr, Cursor's JSON) quotes the code it read, test fixtures
+included, so it can carry values under secret-named keys. Measured: a Codex fix review of an API-token finding left
+nine such lines in its log, and `ia.py hygiene` refused `fix publish` until the log left the run dir.
+
+- Redirect the full log to a scratch folder outside the run dir, never to `<run-dir>/` or `outputs/`.
+- Keep in the run dir only the answer (`-o <file>` for Codex, the `result` field for Cursor) and, for Codex, the log
+  header up to the second `--------` line without the `session id` line, as the evidence of the model.
 
 ## Measurement recipes (tested)
 

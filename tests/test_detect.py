@@ -239,7 +239,7 @@ class ToolAndWorkerTests(unittest.TestCase):
 
     def test_cursor_contrast_uses_agent_ask_mode(self):
         w = [w for w in detect.WORKERS["cursor"] if w["step"] == "contrast"][0]
-        self.assertIn("agent -p --mode ask --model", w["worker"])
+        self.assertIn("agent -p --mode ask --trust --workspace <dir> --model", w["worker"])
         self.assertIn("--output-format json", w["worker"])
 
     def test_exact_install_strings(self):
