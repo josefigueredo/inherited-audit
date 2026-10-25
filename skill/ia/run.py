@@ -417,10 +417,12 @@ SETTABLE = {
     "sections.quality": (_str_list, "a list of strings"),
     "strengths": (_str_list, "a list of strings"),
     "author_model": (lambda v: isinstance(v, str) and bool(v.strip()), "a non-empty string (the model that wrote the findings)"),
+    "fix.authorized_by": (lambda v: isinstance(v, str) and bool(v.strip()),
+                          "a non-empty string (who agreed that the owner team receives fixes)"),
 }
 _TESTS_BRANCH = re.compile(r"^baseline\.([^.]+)\.tests_branch$")
 _RESULT_KEY = re.compile(r"^baseline\.([^.]+)\.result\.(passed|failed|total|coverage|runner|measured)$")
-_STRING_KEYS = ("lang", "author_model")
+_STRING_KEYS = ("lang", "author_model", "fix.authorized_by")
 _WORKER_AVAILABLE = re.compile(r"^workers\.([^.]+)\.([^.]+)\.(.+)\.available$")
 _MODULES = re.compile(r"^modules\.([^.]+)$")
 

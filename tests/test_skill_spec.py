@@ -10,6 +10,8 @@ from ia import cli
 from skillspec import check_skill
 
 SKILL_MD = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+FIX_SKILL = SKILL.parent / "fix-skill"
+FIX_MD = "\n".join(p.read_text(encoding="utf-8") for p in sorted(FIX_SKILL.rglob("*.md")))
 
 
 class SkillSpecTest(unittest.TestCase):
@@ -28,6 +30,25 @@ class SkillSpecTest(unittest.TestCase):
         collect(cli.parser())
         for flag in set(re.findall(r"(--[a-z][a-z-]+)", SKILL_MD)):
             self.assertIn(flag, options, f"SKILL.md mentions {flag}, which no ia command has")
+
+    def test_fix_skill_conforms_and_names_only_real_flags_and_actions(self):
+        self.assertEqual(check_skill(FIX_SKILL, published_name="inherited-fix"), [])
+        self.assertLess(len((FIX_SKILL / "SKILL.md").read_text(encoding="utf-8").splitlines()), 250)
+        fix = next(a for a in cli.parser()._actions if isinstance(a, argparse._SubParsersAction)).choices["fix"]
+        options, actions = set(), set()
+        for a in fix._actions:
+            for name, sub in (a.choices.items() if isinstance(a, argparse._SubParsersAction) else ()):
+                actions.add(name)
+                for b in sub._actions:
+                    options.update(b.option_strings)
+        self.assertEqual(actions, {"plan", "start", "check", "done", "publish"})
+        quoted = {"--amend", "--tests"}  # git and gradle flags quoted in fix.md
+        for flag in set(re.findall(r"(--[a-z][a-z-]+)", FIX_MD)) - quoted:
+            self.assertIn(flag, options, f"fix-skill mentions {flag}, which `ia.py fix` does not have")
+        for action in re.findall(r"`fix (\w+)", FIX_MD):
+            self.assertIn(action, actions)
+        self.assertIn("0 ok, 1 the command found problems, 2 usage error, 3 an external tool failed or is missing, "
+                      "4 ia itself failed", FIX_MD.replace("\n", " "))
 
     def test_exit_codes_in_skill_match_cli(self):
         self.assertIn("0 ok, 1 the command found problems, 2 usage error, 3 an external tool failed or is missing, "

@@ -25,6 +25,10 @@ ENUMS: Dict[str, tuple] = {
 }
 CONTRAST_VERDICTS = ("agree", "refute", "unsure", "")
 CONTRAST_SCOPES = ("severity", "finding", "")
+# `fix` is written by inherited-fix (`ia.py fix`), never by the audit; absent on a finding nobody tried to fix.
+FIX_STATUSES = ("", "started", "moot", "blocked", "declined", "done")
+FIX_CLAIMS = ("targeted", "no_new_risk", "minimal")
+CLAIM_STATES = ("CONFIDENT", "NOT_CONFIDENT", "UNSURE")
 REQUIRED = ("id", "report", "category", "dimension", "title", "verdict", "severity", "confidence", "source",
             "what_happens", "evidence")
 # Correctness dimensions no code test can express: confirmed by a command and its saved output, not a red branch.
@@ -149,12 +153,49 @@ def validate(f: dict) -> List[str]:
                     problems.append(f"missing required field: {name} (confirmed correctness finding with "
                                     "execution confidence)")
     problems.extend(_duplicate_shape_problems(f))
+    problems.extend(fix_problems(f.get("fix")) if "fix" in f else [])
     if not isinstance(f.get("publish_repo", ""), str):
         problems.append("publish_repo must be a string (a repo alias of the run)")
     if f.get("report") == "quality":
         for name in ("suggestion", "effort"):
             if _blank(f.get(name)):
                 problems.append(f"missing required field: {name} (quality finding)")
+    return problems
+
+
+def fix_problems(fix: object) -> List[str]:
+    """The shape of `fix`: status, extra_files, reason, and the reviewer's three claims, each with a state and
+    evidence."""
+    if not isinstance(fix, dict):
+        return ["fix must be an object"]
+    problems = []
+    if fix.get("status", "") not in FIX_STATUSES:
+        problems.append(f"fix.status: {fix.get('status')!r} is not one of " + ", ".join(repr(a) for a in FIX_STATUSES))
+    if not isinstance(fix.get("extra_files", []), list) or not all(isinstance(p, str) and p
+                                                                     for p in fix.get("extra_files", [])):
+        problems.append("fix.extra_files must be a list of paths (relative to the repo, like prod_files)")
+    if not isinstance(fix.get("reason", ""), str):
+        problems.append("fix.reason must be a string")
+    if fix.get("status") in ("blocked", "declined") and _blank(fix.get("reason")):
+        problems.append(f"fix.reason is required when fix.status is {fix['status']}")
+    review = fix.get("review")
+    if review is None:
+        return problems
+    if not isinstance(review, dict):
+        return problems + ["fix.review must be an object"]
+    for key in ("model", "sha"):
+        if key in review and not isinstance(review[key], str):
+            problems.append(f"fix.review.{key} must be a string")
+    claims = review.get("claims", {})
+    if not isinstance(claims, dict):
+        return problems + ["fix.review.claims must be an object"]
+    for name, claim in claims.items():
+        if name not in FIX_CLAIMS:
+            problems.append(f"fix.review.claims: {name!r} is not one of " + ", ".join(repr(a) for a in FIX_CLAIMS))
+        elif not isinstance(claim, dict) or claim.get("state") not in CLAIM_STATES:
+            problems.append(f"fix.review.claims.{name}.state must be one of " + ", ".join(CLAIM_STATES))
+        elif not isinstance(claim.get("evidence"), str) or not claim["evidence"].strip():
+            problems.append(f"fix.review.claims.{name}.evidence must say what in the diff or the outputs backs it")
     return problems
 
 
@@ -246,7 +287,7 @@ def _next_id(run: Path, prefix: str) -> str:
 
 PROSE_KEYS = ("title", "what_happens", "fix_summary", "suggestion", "red_reason", "reason", "notes")
 # Free text nested one level down: masked like the top-level prose.
-NESTED_PROSE = {"contrast": ("note", "rebuttal"), "measurement": ("tool", "value")}
+NESTED_PROSE = {"contrast": ("note", "rebuttal"), "measurement": ("tool", "value"), "fix": ("reason",)}
 
 
 def mask_prose(f: dict, warnings: Optional[List[str]] = None) -> dict:
@@ -270,6 +311,11 @@ def mask_prose(f: dict, warnings: Optional[List[str]] = None) -> dict:
         if isinstance(f.get(key), dict):
             for sub in subs:
                 mask(f[key], sub, f"{key}.{sub}")
+    review = f["fix"].get("review") if isinstance(f.get("fix"), dict) else None
+    claims = review.get("claims") if isinstance(review, dict) else None
+    for name, claim in (claims.items() if isinstance(claims, dict) else []):
+        if isinstance(claim, dict):
+            mask(claim, "evidence", f"fix.review.claims.{name}.evidence")
     for key in ("evidence", "tests"):
         for i, item in enumerate(f.get(key) if isinstance(f.get(key), list) else []):
             if isinstance(item, dict):
