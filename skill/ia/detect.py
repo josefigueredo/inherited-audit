@@ -402,7 +402,7 @@ WORKERS: Dict[str, List[dict]] = {
         _w("e2e", "Playwright", None, "", "e2e-infra"),
         _w("quality", "wshobson/agents (c4-architecture, comprehensive-review)", None,
            "/add-plugin (Cursor 2.5+ marketplace: https://github.com/wshobson/agents)", "quality-lenses"),
-        _w("contrast", "agent -p --mode ask --model <other-model> --output-format json", "agent",
+        _w("contrast", "agent -p --mode ask --trust --workspace <dir> --model <other-model> --output-format json", "agent",
            "", "contrast"),
         _own("proof", "red-test-proof"),
         _own("verify", "verify-high"),
