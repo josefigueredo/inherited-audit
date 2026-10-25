@@ -60,7 +60,8 @@ answer with `python3 <ia> set --run <run-dir> fix.authorized_by='<who and how>'`
 5. **Review**, with a different agent from the fixer, and a model that has not judged this finding before (not the
    finding's `contrast.model`). Prefer another model family when the host has one, through the Codex or cursor-agent
    read-only recipes in the inherited-audit `references/workers.md`. Record as `model` the one the CLI reports in its
-   log header, never the model's own claim. Send the CLI's full log outside the run dir and keep only its header there
+   log header, never the model's own claim. Cursor reports none: record the model id you asked it for, noted as
+   requested (workers.md). Send the CLI's full log outside the run dir and keep only its header there
    (workers.md, "Where a reviewer's log goes"): the log quotes test secrets and `fix publish` refuses it. Give it
    `references/passes/fix-review.md`. It answers three claims, each with evidence: `targeted`, `no_new_risk` and
    `minimal`. Record what it returns:
