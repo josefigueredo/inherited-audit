@@ -56,6 +56,29 @@ class SkillSpecTest(unittest.TestCase):
         self.assertEqual((cli.OK, cli.FINDINGS, cli.USAGE, cli.FAILED, cli.INTERNAL), (0, 1, 2, 3, 4))
 
 
+class SkillShapeTest(unittest.TestCase):
+    """SKILL.md stays an instruction sheet: numbered steps in ia's order, no project history, rare paths elsewhere."""
+
+    def test_every_step_has_one_numbered_heading_in_ia_order(self):
+        from ia import run as runmod
+        headings = re.findall(r"(?m)^### Step ([0-9]+(?:\.[0-9]+|[a-z])?): `([a-z]+)`$", SKILL_MD)
+        self.assertEqual([name for _, name in headings], list(runmod.STEPS))
+        numbers = [num for num, _ in headings]
+        self.assertEqual(len(numbers), len(set(numbers)), f"repeated step numbers: {numbers}")
+
+    def test_no_history_of_the_removed_fix_flag(self):
+        for gone in ("old fix flag", "options.fix", "is gone"):
+            self.assertNotIn(gone, SKILL_MD)
+
+    def test_rare_host_modes_live_in_a_reference(self):
+        modes = (SKILL / "references" / "host-modes.md").read_text(encoding="utf-8")
+        self.assertIn("references/host-modes.md", SKILL_MD)
+        for needle in ("ia.py finding add", "contrast.same_family", "coverage status", "--force-open"):
+            self.assertIn(needle, modes)
+        self.assertNotIn("A contrast\nline", SKILL_MD)
+        self.assertLess(len(SKILL_MD.splitlines()), 390)  # a ratchet: it was 400 before the host modes moved out
+
+
 class ScopeDocsTest(unittest.TestCase):
     """The skill is not tied to a frontend plus a backend: any set of repos, with the stacks detect knows named."""
 

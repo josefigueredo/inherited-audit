@@ -241,8 +241,10 @@ class PassUpgradesTest(unittest.TestCase):
         self.assertIn("up to 12 per lens", text)
         self.assertNotIn("8 to 12", text)
 
-    def test_skill_md_has_the_no_subagent_path(self):
-        text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+    def test_host_modes_has_the_no_subagent_path(self):
+        skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+        self.assertRegex(skill, r"(?m)^## No subagents on this host$")
+        text = (SKILL / "references" / "host-modes.md").read_text(encoding="utf-8")
         self.assertRegex(text, r"(?m)^## No subagents on this host$")
         section = text.split("## No subagents on this host")[1].split("\n## ")[0].lower()
         for needle in ("sequentially", "module by module", "coverage status", "read-only cli", "different model",
