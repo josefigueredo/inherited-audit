@@ -86,6 +86,28 @@ Ids `C-NN` (correctitud) y `Q-NN` (calidad). El detalle de cada campo está en
 `confidence` es `execution` (se corrió), `docs` (verificado contra documentación oficial o la API de la herramienta, sin correrlo) o `unverified` (no entra en los
 reportes).
 
+## Medir una corrida contra una clave (`ia.py eval`)
+
+`ia.py eval --run <run-dir> --reference <clave.json>` cuenta cuántos problemas conocidos volvió a encontrar una corrida.
+No es un paso de la auditoría: sirve para comparar pases, workers o modelos sobre un sistema cuyos problemas ya se
+conocen, como el banco de [`bench/`](../bench/README.md).
+
+| Campo de la clave | Qué es |
+|---|---|
+| `sha` | El commit auditado. `eval` se niega (código 2) si la corrida auditó otro |
+| `aliases` | Alias de la clave → subcarpeta del repo, para comparar rutas aunque la corrida use otros alias |
+| `items` | Los problemas sembrados o conocidos: `ref`, `title`, `cites` y `cause_keywords`; opcional `area` |
+| `pass_at` | Cuántos ítems hay que encontrar para pasar |
+| `decoys` | Opcional. Código correcto que parece sospechoso: `ref`, `title`, `cites` y `claim_keywords` |
+| `max_decoy_hits` | Opcional. Cuántos falsos positivos se toleran; sin este campo, pasar depende solo de lo encontrado |
+
+Un hallazgo cuenta para un ítem cuando cita el mismo archivo con líneas a 15 o menos de distancia **y** una de las
+`cause_keywords` aparece en su título, en `what_happens` o en `red_reason`. Cada hallazgo cuenta para un solo ítem. Un
+hallazgo que cae sobre un señuelo y dice lo que dice su `claim_keywords` es un falso positivo. Los descartados no
+cuentan para nada. Si un señuelo está a 15 líneas o menos de un ítem, la clave se rechaza, porque un mismo hallazgo
+contaría como acierto y como error. Con `area`, el resultado se desglosa por área. El puntaje es un candidato: cada
+par hay que confirmarlo leyendo los dos.
+
 ## Códigos de salida de `ia.py`
 
 | Código | Significa |
