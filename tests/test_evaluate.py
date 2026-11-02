@@ -168,6 +168,92 @@ class MatchTest(unittest.TestCase):
         return {"system": "x", "sha": "0" * 40, "pass_at": 7, "items": items}
 
 
+def decoy(name="D1", path="BACK/src/a.ts", a=60, b=70, keywords=("injection",)):
+    return {"ref": name, "title": "looks unsafe, is not", "cites": [{"cite": path, "from": a, "to": b}],
+            "claim_keywords": list(keywords)}
+
+
+class DecoyTest(unittest.TestCase):
+    """Decoys are correct code that looks suspicious: a finding that claims their problem is a false positive."""
+
+    @staticmethod
+    def reference(items, decoys=None, **extra):
+        doc = {"system": "x", "sha": "0" * 40, "pass_at": 1, "items": items, **extra}
+        if decoys is not None:
+            doc["decoys"] = decoys
+        return doc
+
+    def test_finding_on_a_decoy_with_its_claim_is_a_false_positive(self):
+        result = evaluate.score(self.reference([ref()], [decoy()]),
+                                [finding("C-02", a=62, b=64, title="SQL injection in the query")])
+        self.assertEqual(result["decoy_hits"], {"D1": ["C-02"]})
+
+    def test_decoy_needs_place_and_claim(self):
+        reference = self.reference([ref()], [decoy()])
+        near_other_claim = finding("C-02", a=62, b=64, title="a slow loop")
+        far_same_claim = finding("C-03", path="BACK/src/b.ts", a=62, b=64, title="SQL injection")
+        self.assertEqual(evaluate.score(reference, [near_other_claim, far_same_claim])["decoy_hits"], {})
+
+    def test_discarded_finding_never_hits_a_decoy(self):
+        result = evaluate.score(self.reference([ref()], [decoy()]),
+                                [finding("C-02", a=62, b=64, title="injection", verdict="discarded")])
+        self.assertEqual(result["decoy_hits"], {})
+
+    def test_max_decoy_hits_fails_a_run_with_full_recall(self):
+        reference = self.reference([ref()], [decoy()], max_decoy_hits=0)
+        noisy = [finding("C-01"), finding("C-02", a=62, b=64, title="injection here")]
+        self.assertFalse(evaluate.score(reference, noisy)["pass"])
+        self.assertTrue(evaluate.score(reference, noisy[:1])["pass"])
+
+    def test_without_max_decoy_hits_pass_is_recall_only(self):
+        noisy = [finding("C-01"), finding("C-02", a=62, b=64, title="injection here")]
+        self.assertTrue(evaluate.score(self.reference([ref()], [decoy()]), noisy)["pass"])
+
+    def test_report_lists_decoy_hits_and_areas(self):
+        items = [dict(ref("1"), area="races-distributed"), dict(ref("2", path="BACK/src/b.ts"), area="security")]
+        reference = self.reference(items, [decoy()], max_decoy_hits=0)
+        result = evaluate.score(reference, [finding("C-01"), finding("C-02", a=62, b=64, title="injection")])
+        text = "\n".join(evaluate.report_lines(reference, result))
+        self.assertIn("decoys hit: 1/1; false-positive findings: 1 (allowed 0)", text)
+        self.assertIn("  D1  looks unsafe, is not: C-02", text)
+        self.assertIn("by area:", text)
+        self.assertIn("  races-distributed: 1/1", text)
+        self.assertIn("  security: 0/1", text)
+
+    def test_two_findings_on_one_decoy_are_two_false_positives(self):
+        reference = self.reference([ref()], [decoy()], max_decoy_hits=1)
+        noisy = [finding("C-01"), finding("C-02", a=62, b=64, title="injection"),
+                 finding("C-03", a=66, b=68, title="injection again")]
+        result = evaluate.score(reference, noisy)
+        self.assertEqual(result["false_positives"], 2)
+        self.assertFalse(result["pass"])
+
+    def test_reference_without_decoys_or_areas_reports_as_before(self):
+        reference = {"system": "x", "sha": "0" * 40, "pass_at": 1, "items": [ref()]}
+        text = "\n".join(evaluate.report_lines(reference, evaluate.score(reference, [finding()])))
+        self.assertNotIn("decoy", text)
+        self.assertNotIn("by area", text)
+
+    def write(self, doc):
+        tmp = make_dir()
+        (tmp / "r.json").write_text(json.dumps(doc), encoding="utf-8")
+        return tmp / "r.json"
+
+    def test_load_rejects_a_decoy_next_to_an_item(self):
+        path = self.write(self.reference([ref()], [decoy(a=25, b=30)]))
+        with self.assertRaises(UsageError) as ctx:
+            evaluate.load_reference(path)
+        self.assertIn("D1", str(ctx.exception))
+
+    def test_load_rejects_a_decoy_without_claim_keywords_or_with_short_ones(self):
+        for bad in ((), ("sql",)):
+            with self.assertRaises(UsageError):
+                evaluate.load_reference(self.write(self.reference([ref()], [decoy(keywords=bad)])))
+
+    def test_load_accepts_a_decoy_far_from_items(self):
+        self.assertEqual(len(evaluate.load_reference(self.write(self.reference([ref()], [decoy()])))["decoys"]), 1)
+
+
 class ReferenceFileTest(unittest.TestCase):
     def test_reference_file_is_valid(self):
         path = os.environ.get("IA_EVAL_REFERENCE")
