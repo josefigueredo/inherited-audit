@@ -27,5 +27,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      # A developer machine can carry a global git hook (an identity check, a linter) that rejects the fixtures'
+      # commits. Run the suite under one that rejects every commit, so a fixture that is not hermetic fails here.
+      - name: Install a hostile global git hook
+        run: |
+          mkdir -p "$RUNNER_TEMP/hostile-hooks"
+          printf '#!/bin/sh\necho "rejected by the hostile global hook" >&2\nexit 1\n' > "$RUNNER_TEMP/hostile-hooks/pre-commit"
+          chmod +x "$RUNNER_TEMP/hostile-hooks/pre-commit"
+          git config --global core.hooksPath "$RUNNER_TEMP/hostile-hooks"
       - name: Run tests
         run: python -m unittest discover -s tests -v

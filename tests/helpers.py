@@ -17,6 +17,9 @@ _TEMP = []
 GIT_ENV = {
     "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com", "GIT_AUTHOR_DATE": "2026-10-18T12:00:00+00:00",
     "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.com", "GIT_COMMITTER_DATE": "2026-10-18T12:00:00+00:00",
+    # Hermetic: the person's global and system config (core.hooksPath, commit.gpgsign, init templates) never reach
+    # the fixture repos, so the suite gives the same result on a developer machine as in CI.
+    "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
 }
 
 
