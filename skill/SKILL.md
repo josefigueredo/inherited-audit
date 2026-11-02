@@ -61,11 +61,11 @@ Not for:
 |---|---|---|
 | `publish` | `false` | With `true`, at the end `ia.py publish` writes issue and PR bodies and the exact `gh` commands (labels from each dimension, conventional PR titles, no LLM attribution: hygiene checks it). It never runs them. |
 
-Ask only if the person did not say. It maps to `ia.py init --publish`. The skill never applies a fix: every confirmed
-correctness finding stops at a branch with the red test (commit 1, tests only) and the written proposal in
-`fix_summary`. The old fix flag of `init` is gone (`init` refuses it); a manifest with `options.fix: true` still loads, warns
-once and behaves as `false`. When `publish` is on, warn once: on someone else's system, publishing is exactly what the owner-team filter tries to keep small; the person
-decides what to run.
+Ask only if the person did not say. It maps to `ia.py init --publish`. When `publish` is on, warn once: on someone
+else's system, publishing is exactly what the owner-team filter tries to keep small; the person decides what to run.
+
+The skill never applies a fix: every confirmed correctness finding stops at a branch with the red test (commit 1,
+tests only) and the written proposal in `fix_summary`. Fixing them is the job of the `inherited-fix` skill.
 
 ## The CLI and where it lives
 
@@ -147,38 +147,22 @@ The skill does not depend on named subagents. For every pass:
 - When a subagent returns, check its findings with `ia.py finding list --run <run-dir>` rather than trusting its
   summary.
 
-When a pass prints JSON blocks instead of writing (a read-only host mode, such as Cursor's agent CLI in ask mode), you
-apply them. Save each finding block to its own file and run `ia.py finding add --run <run-dir> <file>`. A contrast
-line `{"id": "C-07", "contrast": {...}}` becomes one call:
-`ia.py finding set --run <run-dir> C-07 contrast.model=<model> contrast.same_family=<true|false>
-contrast.verdict=<agree|refute|unsure> 'contrast.note=<note>'`. Then check them with `ia.py finding list`.
+When a pass prints JSON blocks instead of writing (a read-only host mode), apply them as
+`references/host-modes.md` says.
 
 External workers (a slash command, a plugin skill, a scanner) follow the same rule: run them, then turn every result
 you keep into a finding in the schema of `references/schema.md`, with `source` set to the worker's name.
 
 ## No subagents on this host
 
-Some hosts or sessions cannot launch subagents (no agent tool, or a mode that forbids it). The audit still runs; only
-who does each pass changes. Tell the person once, at step 0, and say it again in "Finishing".
-
-- **Run the passes yourself, sequentially, module by module, driven by the coverage map.** Take the first open cell
-  from `python3 <skill-dir>/ia.py coverage status --run <run-dir>`, read that pass file, run it on that one module,
-  record the cell with `ia.py coverage add`, and take the next. For `races-distributed`, walk the ten topics with the
-  pass's starting searches on the module before recording it with `--topics`. Finish a module before opening the
-  next, so a time-box leaves whole modules done rather than every module half done.
-- When the time does not reach, say how many cells are left and let the person decide; only they can close with
-  `--force-open "<reason>"`.
-- **Writing passes** (proof, unit-tests, e2e-infra) run one at a time, still each in its own worktree, removed when done.
-- **verify:** the judgment comes from a **different model** through a read-only CLI (the contrast rows of
-  `references/workers.md`: Cursor's `agent` CLI in ask mode, or the read-only Codex CLI recipe there), given
-  only the verify-high pass, the finding files, the branches and the run dir. A read-only CLI cannot run tests, so
-  you, the orchestrator, rerun them in a throwaway worktree and record them as rerun by the orchestrator in
-  `outputs/<id>-verify.txt`; the verifier judges that output. `references/passes/verify-high.md` has the details.
-- **contrast** still uses a model of another family from the author's, as in its step, and preferably not the
-  model that did verify, so each check comes from fresh eyes.
+Some hosts or sessions cannot launch subagents. The audit still runs, with you doing the passes sequentially, module
+by module, and a different model judging through a read-only CLI: follow `references/host-modes.md`. Tell the person
+once, at step 0, and again in "Finishing".
 
 ## The checklist
 
+The steps run in this order, the same one `ia.py status` prints: 0 `baseline`, 1a `correctness`, 1b `proof`,
+1.5 `tests`, 2 `quality`, 3 `contrast`, 4 `verify`, 5 `filter`, 6 `prose`, 7 `hygiene`, 8 `render`.
 `references/checklist.md` has each step's acceptance criterion; `references/rubric.md` the severity, confidence and
 effort scales; `references/schema.md` the finding and manifest fields; `references/workers.md` who does each step on
 each host. Mark a step `in_progress` when you start it:
@@ -233,7 +217,7 @@ python3 <skill-dir>/ia.py step --run <run-dir> correctness in_progress
   records `baseline.<ALIAS>.result.total=0`. A repo without `test_cmd` does not close the baseline until that manual
   result is set; the step closes by itself once every repo has a parsed or manual result.
 
-### Step 1: `correctness`
+### Step 1a: `correctness`
 
 - Read: `references/rubric.md`, `references/schema.md`, `references/verification-rules.md`.
 - Workers (per `references/workers.md`):
@@ -269,7 +253,7 @@ python3 <skill-dir>/ia.py coverage status --run <run-dir>
   decides a module stays out, `ia.py step --run <run-dir> correctness done --force-open "<reason>"` closes anyway,
   records the reason and the open cells in `manifest.coverage_waivers`, and the report shows it in "How it was done".
 
-### Step 1: `proof`
+### Step 1b: `proof`
 
 - Read: `references/passes/red-test-proof.md` and the "Red for the right reason" section of `references/checklist.md`.
 - Worker: own pass on both hosts, one subagent per candidate (or small group), each in its own worktree.
@@ -322,7 +306,7 @@ python3 <skill-dir>/ia.py finding set --run <run-dir> C-07 verdict=confirmed con
 - Closes: `ia.py step --run <run-dir> quality done`, which refuses while a module has no `quality-lenses` cell;
   `--force-open "<reason>"` works as in step 1.
 
-### `contrast`
+### Step 3: `contrast`
 
 - Read: `references/passes/contrast.md`, the contrast row of `references/workers.md`.
 - Worker: Claude Code `/codex:adversarial-review` (Codex plugin); Cursor's `agent` CLI with another model in ask mode;
@@ -342,7 +326,7 @@ python3 <skill-dir>/ia.py finding set --run <run-dir> C-07 verdict=confirmed con
   and each contrast model. The reports never print pass names, only external workers by name.
 - Closes: `ia.py step --run <run-dir> contrast done`.
 
-### `verify`
+### Step 4: `verify`
 
 - Read: `references/passes/verify-high.md`.
 - Worker: own pass in a **fresh** subagent that never saw the finder's reasoning: it gets only the finding file, the
@@ -350,7 +334,7 @@ python3 <skill-dir>/ia.py finding set --run <run-dir> C-07 verdict=confirmed con
   subagents, a different model through a read-only CLI judges and you rerun the tests ("No subagents on this host").
 - Closes: `ia.py step --run <run-dir> verify done`.
 
-### `filter`
+### Step 5: `filter`
 
 - Read: the "Filter" section of `references/checklist.md`.
 - Mark exclusions first (`ia.py finding set --run <run-dir> C-12 exclude=refactor`; a repeat: `exclude=duplicate duplicate_of=C-07`), then run
@@ -358,7 +342,7 @@ python3 <skill-dir>/ia.py finding set --run <run-dir> C-07 verdict=confirmed con
   5). It sets `shown` on every finding and prints the shown and total counts; tell the person both.
 - Closes: `ia.py filter` marks `filter` done.
 
-### `prose`
+### Step 6: `prose`
 
 - Read: `references/passes/owner-prose.md`.
 - Worker: own pass. Writes `audience.title`, `audience.what_happens` and `audience.fix_summary` for every shown finding,
@@ -366,7 +350,7 @@ python3 <skill-dir>/ia.py finding set --run <run-dir> C-07 verdict=confirmed con
   recipe. Run the pass's forbidden-terms check.
 - Closes: `ia.py step --run <run-dir> prose done`.
 
-### `hygiene`
+### Step 7: `hygiene`
 
 - Read: the "Hygiene" section of `references/checklist.md`.
 - Run `python3 <skill-dir>/ia.py hygiene --run <run-dir>`: secrets and 40-character ids in branches and saved
@@ -375,7 +359,7 @@ python3 <skill-dir>/ia.py finding set --run <run-dir> C-07 verdict=confirmed con
   (`references/verification-rules.md`, rule 7).
 - Closes: `ia.py step --run <run-dir> hygiene done`.
 
-### `render`
+### Step 8: `render`
 
 - Read: the "Optional publish" section of `references/checklist.md` when `publish` is on.
 - Worker: the CLI only; the HTML comes only from the data and git, from `assets/template.html` with `assets/theme.css`.
