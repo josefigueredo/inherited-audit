@@ -15,6 +15,7 @@ tope, así que con un cupón de 150% un carrito de 100 da -50.
 | Los reportes | «Armá los reportes para el equipo dueño» | [Los dos reportes](#4-los-dos-reportes) |
 | `inherited-audit` | «Retomá la auditoría» | [Retomar en otro host](#5-retomar-en-otro-host) |
 | `ia-auditor` | «Usá un subagente con nombre» | [Los subagentes opcionales](#6-los-subagentes-opcionales) |
+| `inherited-fix` | «Arreglá el hallazgo C-24» | [Arreglar un hallazgo publicado](#7-arreglar-un-hallazgo-publicado) |
 
 ---
 
@@ -124,6 +125,30 @@ La skill no depende de subagentes con nombre: lanza uno genérico con la ruta de
 preferís uno con nombre, `./install.sh --agents` enlaza `ia-auditor` para Claude Code y para Cursor. El de Cursor es de
 solo lectura y sirve para las pasadas de análisis; las que escriben (el test rojo, los unitarios, el e2e) necesitan un
 agente normal en su propio worktree.
+
+---
+
+## 7. Arreglar un hallazgo publicado
+
+**Componente:** `inherited-fix` · **Escribe:** un worktree y `fix/commands.sh` en la corrida, y commits locales en la
+rama del PR.
+
+La auditoría se detiene en el test rojo a propósito: tocar el código de producción de otro equipo es decisión de ese
+equipo. Cuando acepta los arreglos, la skill compañera `inherited-fix` toma la rama roja ya publicada (o el PR
+borrador) y le suma el arreglo:
+
+1. `ia.py fix plan` lista las ramas de PR para arreglar. Un PR de grupo se arregla entero, en orden, en un solo
+   worktree.
+2. `ia.py fix start` crea el worktree y corre la suite sobre un merge descartable con la base real del PR. Si el test ya
+   pasa ahí, el hallazgo queda `moot`: alguien lo arregló antes.
+3. Un subagente escribe el arreglo y `ia.py fix check` revisa que el test rojo siga intacto, el alcance y los mensajes,
+   y que la suite no tenga fallas nuevas.
+4. Otro agente, con un modelo que no juzgó antes ese hallazgo, revisa el commit; `ia.py fix done` lo registra solo con esa revisión.
+5. `ia.py fix publish` deja en `fix/commands.sh` el push, el cuerpo del PR reescrito (`Refs` pasa a `Closes`) y
+   `gh pr ready`. No lo corre: lo revisás y lo corrés vos.
+
+Sin `fix.authorized_by` en el manifest (quién aceptó los arreglos, y cómo), `fix start` se niega. El detalle de cada
+acción está en la [referencia](referencia.md#después-de-la-auditoría-arreglos-inherited-fix).
 
 ---
 
