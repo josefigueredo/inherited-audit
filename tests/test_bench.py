@@ -75,8 +75,8 @@ class BenchBuildTest(unittest.TestCase):
 class BenchKeyTest(unittest.TestCase):
     def test_key_loads_and_no_decoy_sits_next_to_an_item(self):
         loaded = evaluate.load_reference(BENCH / "key.json")
-        self.assertEqual(len(loaded["items"]), 10)
-        self.assertEqual(len(loaded["decoys"]), 6)
+        self.assertEqual(len(loaded["items"]), 14)
+        self.assertEqual(len(loaded["decoys"]), 7)
 
     def test_every_cite_is_inside_its_file(self):
         repo = built_repo()
@@ -125,13 +125,13 @@ class BenchAuditTest(unittest.TestCase):
         self.assertEqual(detect.returncode, 0, detect.stderr)
         manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(sorted(manifest["modules"]["SHOP"]),
-                         ["src/catalog", "src/exports", "src/jobs", "src/orders", "src/payments"])
+                         ["src/catalog", "src/checkout", "src/exports", "src/jobs", "src/orders", "src/payments", "src/storefront"])
         base = run_cli(["baseline", "--run", str(out), "--timeout", "120"])
         self.assertEqual(base.returncode, 0, base.stdout + base.stderr)
         manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["steps"]["baseline"], "done")
         result = manifest["baseline"]["SHOP"]["result"]
-        self.assertEqual((result["passed"], result["failed"], result["total"]), (11, 0, 11))
+        self.assertEqual((result["passed"], result["failed"], result["total"]), (16, 0, 16))
 
     def test_eval_accepts_a_run_of_the_bench(self):
         out = make_dir() / "run"
@@ -139,8 +139,8 @@ class BenchAuditTest(unittest.TestCase):
                                   str(out)]).returncode, 0)
         result = run_cli(["eval", "--run", str(out), "--reference", str(BENCH / "key.json")])
         self.assertEqual(result.returncode, 1, result.stderr)  # no findings yet: a FAIL, not a usage error
-        self.assertIn("candidate score: 0/10 (pass at 7)", result.stdout)
-        self.assertIn("decoys hit: 0/6; false-positive findings: 0 (allowed 1)", result.stdout)
+        self.assertIn("candidate score: 0/14 (pass at 9)", result.stdout)
+        self.assertIn("decoys hit: 0/7; false-positive findings: 0 (allowed 1)", result.stdout)
 
 
 if __name__ == "__main__":

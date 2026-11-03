@@ -8,11 +8,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from catalog import products, store  # noqa: E402
 from catalog.inventory import Inventory, OutOfStock  # noqa: E402
+from checkout.flow import Checkout  # noqa: E402
 from exports.files import Exports  # noqa: E402
+from jobs.checkout_queue import CheckoutConsumer  # noqa: E402
+from jobs.leased_queue import LeasedQueue  # noqa: E402
 from jobs.worker import Worker  # noqa: E402
 from orders.service import Orders  # noqa: E402
 from payments.client import PaymentsClient  # noqa: E402
 from payments.money import format_cents, to_cents  # noqa: E402
+from storefront.handlers import enqueue_checkout, retry_payment  # noqa: E402
 
 
 class CatalogTest(unittest.TestCase):
@@ -116,6 +120,65 @@ class ExportsTest(unittest.TestCase):
                 fh.write("ok")
             self.assertEqual(exports.read_report("q1.txt"), "ok")
 
+
+
+class CheckoutTest(unittest.TestCase):
+    def shop(self):
+        class Transport:
+            def post(self, path, payload):
+                return {"id": "ch_1", "status": "succeeded"}
+
+        inventory = Inventory({"L1": 3})
+        return Checkout(Orders(), inventory, PaymentsClient(Transport()), {"L1": 2500}), inventory
+
+    def test_submit_pays_the_order_and_takes_the_stock(self):
+        checkout, inventory = self.shop()
+        order = checkout.submit("ana", [{"sku": "L1", "qty": 2}], "tok")
+        self.assertEqual((order["status"], order["charge_id"]), ("paid", "ch_1"))
+        self.assertEqual(inventory.available("L1"), 1)
+
+    def test_cancel_gives_the_stock_back(self):
+        checkout, inventory = self.shop()
+        order = checkout._orders.place("ana", [{"sku": "L1", "qty": 2}])
+        inventory.reserve("L1", 2)
+        checkout.cancel(order["number"])
+        self.assertEqual(inventory.available("L1"), 3)
+
+    def test_consumer_handles_one_request(self):
+        checkout, _ = self.shop()
+        acked = []
+
+        class Queue:
+            def receive(self):
+                return {"id": "m1", "request_id": "r1", "owner": "ana", "items": [{"sku": "L1", "qty": 1}],
+                        "card": "tok"}
+
+            def ack(self, message_id):
+                acked.append(message_id)
+
+        self.assertTrue(CheckoutConsumer(Queue(), checkout).run_once())
+        self.assertEqual(acked, ["m1"])
+
+
+class StorefrontTest(unittest.TestCase):
+    def test_enqueue_then_receive_and_ack(self):
+        queue = LeasedQueue(clock=lambda: 0.0)
+        self.assertEqual(enqueue_checkout(queue, "ana", [{"sku": "L1", "qty": 1}], "tok"), {"status": 202})
+        message = queue.receive()
+        self.assertEqual(message["owner"], "ana")
+        self.assertTrue(queue.ack(message["id"]))
+        self.assertEqual(queue.size(), 0)
+
+    def test_retry_payment_when_the_gateway_answers(self):
+        class Transport:
+            def post(self, path, payload):
+                return {"id": "ch_9", "status": "succeeded"}
+
+        orders = Orders()
+        order = orders.place("ana", [{"sku": "L1", "qty": 1}])
+        checkout = Checkout(orders, Inventory({"L1": 1}), PaymentsClient(Transport()), {"L1": 2500})
+        answer = retry_payment(checkout, order["number"], "tok")
+        self.assertEqual((answer["status"], answer["state"]), (200, "paid"))
 
 if __name__ == "__main__":
     unittest.main()

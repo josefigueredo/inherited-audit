@@ -1,70 +1,405 @@
 {
-  "system": "shop (inherited-audit bench)",
-  "sha": "605d7644da4c2b987b3619245ba1787ed0a8b89e",
-  "aliases": {"SHOP": ""},
-  "pass_at": 7,
-  "max_decoy_hits": 1,
-  "notes": "Seeded and written by the same model family that runs the fallback passes; read the scores as a comparison between arms on the same key, not as an absolute measure. Each item and decoy has a proof in bench/proofs/ (items fail at sha, decoys pass). pass_at (7 of 10, about two thirds) and max_decoy_hits are a first, arbitrary bar. R4 was not planted: the first fallback run found it and it was added with its proof. Known real issue left out of the key: Exports.total_size (files.py 31-32) lists then stats, so a concurrent remove_export makes it raise; it sits within 15 lines of D6, so it cannot be an item until the next sha bump moves one of them. A run that reports it is right, and the score ignores it.",
-  "items": [
-    {"ref": "C1", "area": "correctness-general", "dimension": "bug",
-     "title": "Pagination drops the last order of every page",
-     "cites": [{"cite": "SHOP/src/orders/service.py", "from": 39, "to": 45}],
-     "cause_keywords": ["pagina", "off-by-one", "per_page"]},
-    {"ref": "C2", "area": "correctness-general", "dimension": "bug",
-     "title": "Mutable default list leaks the sale label into later products",
-     "cites": [{"cite": "SHOP/src/catalog/products.py", "from": 13, "to": 17}],
-     "cause_keywords": ["mutable default", "default argument", "shared"]},
-    {"ref": "C3", "area": "quality-lenses", "dimension": "documentation",
-     "title": "to_cents promises half-up rounding but rounds half to even on a float",
-     "cites": [{"cite": "SHOP/src/payments/money.py", "from": 4, "to": 6}],
-     "cause_keywords": ["rounding", "half up", "banker"]},
-    {"ref": "R1", "area": "races-distributed", "dimension": "race",
-     "title": "Two buyers can reserve the last unit: check and update are not atomic",
-     "cites": [{"cite": "SHOP/src/catalog/inventory.py", "from": 16, "to": 26}],
-     "cause_keywords": ["race", "oversell", "concurren"]},
-    {"ref": "R2", "area": "races-distributed", "dimension": "distributed",
-     "title": "A charge retried after a timeout has no idempotency key and can charge twice",
-     "cites": [{"cite": "SHOP/src/payments/client.py", "from": 16, "to": 24}],
-     "cause_keywords": ["idempot", "double charge", "charged twice", "duplicate"]},
-    {"ref": "R3", "area": "races-distributed", "dimension": "distributed",
-     "title": "The worker acknowledges a message before handling it, so a failure loses it",
-     "cites": [{"cite": "SHOP/src/jobs/worker.py", "from": 12, "to": 19}],
-     "cause_keywords": ["acknowledg", "acks", "lost"]},
-    {"ref": "R4", "area": "races-distributed", "dimension": "race",
-     "title": "Rewriting an export truncates it in place, so a reader in between sees it empty or partial",
-     "cites": [{"cite": "SHOP/src/exports/files.py", "from": 14, "to": 18}],
-     "cause_keywords": ["truncat", "partial", "atomic"]},
-    {"ref": "S1", "area": "security", "dimension": "security",
-     "title": "Search text is interpolated into SQL",
-     "cites": [{"cite": "SHOP/src/catalog/store.py", "from": 26, "to": 29}],
-     "cause_keywords": ["injection", "sql inj", "parameter"]},
-    {"ref": "S2", "area": "security", "dimension": "security",
-     "title": "Any signed-in user can read any order",
-     "cites": [{"cite": "SHOP/src/orders/service.py", "from": 47, "to": 54}],
-     "cause_keywords": ["authoriz", "idor", "another user", "ownership"]},
-    {"ref": "S3", "area": "security", "dimension": "security",
-     "title": "Export names can leave the exports folder",
-     "cites": [{"cite": "SHOP/src/exports/files.py", "from": 9, "to": 12}],
-     "cause_keywords": ["traversal", "outside", "escape"]}
-  ],
-  "decoys": [
-    {"ref": "D1", "title": "ORDER BY column comes from a fixed map, values are parameters",
-     "cites": [{"cite": "SHOP/src/catalog/store.py", "from": 46, "to": 51}],
-     "claim_keywords": ["injection", "sql inj"]},
-    {"ref": "D2", "title": "Order numbering is under the lock",
-     "cites": [{"cite": "SHOP/src/orders/service.py", "from": 11, "to": 17}],
-     "claim_keywords": ["race", "concurren", "atomic"]},
-    {"ref": "D3", "title": "Retrying a status read is safe: it is a GET",
-     "cites": [{"cite": "SHOP/src/payments/client.py", "from": 43, "to": 50}],
-     "claim_keywords": ["idempot", "duplicate", "double"]},
-    {"ref": "D4", "title": "random only adds jitter to retry delays",
-     "cites": [{"cite": "SHOP/src/payments/client.py", "from": 52, "to": 53}],
-     "claim_keywords": ["predictable", "cryptograph", "insecure random"]},
-    {"ref": "D5", "title": "The worker logs the send error and raises it again",
-     "cites": [{"cite": "SHOP/src/jobs/worker.py", "from": 38, "to": 43}],
-     "claim_keywords": ["swallow", "silenc", "hides the error"]},
-    {"ref": "D6", "title": "Report names are resolved and checked against the reports folder",
-     "cites": [{"cite": "SHOP/src/exports/files.py", "from": 34, "to": 41}],
-     "claim_keywords": ["traversal", "outside", "escape"]}
-  ]
+ "system": "shop (inherited-audit bench)",
+ "sha": "87de31923ec3daccef58b56beee58c9841ff4bf4",
+ "aliases": {
+  "SHOP": ""
+ },
+ "pass_at": 9,
+ "max_decoy_hits": 1,
+ "notes": "v2. Seeded and written by the same model family that runs the fallback passes; read the scores as a comparison between arms on the same key, not as an absolute measure. Each item and decoy has a proof in bench/proofs/ (items fail at sha, decoys pass). Pre-registered before any v2 run: the primary measure is how many of the hard items H1-H4 each arm finds (each needs more than one function, and H2-H4 more than one module: the queue's lease contract, the gateway client's timeout handling, the storefront handler and the money helpers); then false positives; then cost from /cost. pass_at (9 of 14) and max_decoy_hits are a first, arbitrary bar. Protocol: init with --lang en and ask for finding titles and what_happens in English; the keywords are English only and were written before any v2 run. R4 was not planted: a v1 run found it. Six defects nobody planted that v1 runs found (negative quantities, shared item dicts, page 0, a sleep after the last retry, total_size on a vanished file, a symlinked reports folder) are fixed in v2. v1 (sha 605d764, 10 items) scored 10/10 with 0 decoys on both arms: it saturated.",
+ "items": [
+  {
+   "ref": "C1",
+   "area": "correctness-general",
+   "dimension": "bug",
+   "title": "Pagination drops the last order of every page",
+   "cites": [
+    {
+     "cite": "SHOP/src/orders/service.py",
+     "from": 41,
+     "to": 49
+    }
+   ],
+   "cause_keywords": [
+    "pagina",
+    "off-by-one",
+    "per_page"
+   ]
+  },
+  {
+   "ref": "C2",
+   "area": "correctness-general",
+   "dimension": "bug",
+   "title": "Mutable default list leaks the sale label into later products",
+   "cites": [
+    {
+     "cite": "SHOP/src/catalog/products.py",
+     "from": 13,
+     "to": 17
+    }
+   ],
+   "cause_keywords": [
+    "mutable default",
+    "default argument",
+    "shared"
+   ]
+  },
+  {
+   "ref": "C3",
+   "area": "quality-lenses",
+   "dimension": "documentation",
+   "title": "to_cents promises half-up rounding but rounds half to even on a float",
+   "cites": [
+    {
+     "cite": "SHOP/src/payments/money.py",
+     "from": 4,
+     "to": 6
+    }
+   ],
+   "cause_keywords": [
+    "rounding",
+    "half up",
+    "banker"
+   ]
+  },
+  {
+   "ref": "R1",
+   "area": "races-distributed",
+   "dimension": "race",
+   "title": "Two buyers can reserve the last unit: check and update are not atomic",
+   "cites": [
+    {
+     "cite": "SHOP/src/catalog/inventory.py",
+     "from": 21,
+     "to": 28
+    }
+   ],
+   "cause_keywords": [
+    "race",
+    "oversell",
+    "concurren"
+   ]
+  },
+  {
+   "ref": "R2",
+   "area": "races-distributed",
+   "dimension": "distributed",
+   "title": "A charge retried after a timeout has no idempotency key and can charge twice",
+   "cites": [
+    {
+     "cite": "SHOP/src/payments/client.py",
+     "from": 16,
+     "to": 25
+    }
+   ],
+   "cause_keywords": [
+    "idempot",
+    "double charge",
+    "charged twice",
+    "duplicate"
+   ]
+  },
+  {
+   "ref": "R3",
+   "area": "races-distributed",
+   "dimension": "distributed",
+   "title": "The worker acknowledges a message before handling it, so a failure loses it",
+   "cites": [
+    {
+     "cite": "SHOP/src/jobs/worker.py",
+     "from": 12,
+     "to": 19
+    }
+   ],
+   "cause_keywords": [
+    "acknowledg",
+    "acks",
+    "lost"
+   ]
+  },
+  {
+   "ref": "R4",
+   "area": "races-distributed",
+   "dimension": "race",
+   "title": "Rewriting an export truncates it in place, so a reader in between sees it empty or partial",
+   "cites": [
+    {
+     "cite": "SHOP/src/exports/files.py",
+     "from": 14,
+     "to": 18
+    }
+   ],
+   "cause_keywords": [
+    "truncat",
+    "partial",
+    "atomic"
+   ]
+  },
+  {
+   "ref": "S1",
+   "area": "security",
+   "dimension": "security",
+   "title": "Search text is interpolated into SQL",
+   "cites": [
+    {
+     "cite": "SHOP/src/catalog/store.py",
+     "from": 26,
+     "to": 29
+    }
+   ],
+   "cause_keywords": [
+    "injection",
+    "sql inj",
+    "parameter"
+   ]
+  },
+  {
+   "ref": "S2",
+   "area": "security",
+   "dimension": "security",
+   "title": "Any signed-in user can read any order",
+   "cites": [
+    {
+     "cite": "SHOP/src/orders/service.py",
+     "from": 51,
+     "to": 58
+    }
+   ],
+   "cause_keywords": [
+    "authoriz",
+    "idor",
+    "another user",
+    "ownership"
+   ]
+  },
+  {
+   "ref": "S3",
+   "area": "security",
+   "dimension": "security",
+   "title": "Export names can leave the exports folder",
+   "cites": [
+    {
+     "cite": "SHOP/src/exports/files.py",
+     "from": 9,
+     "to": 12
+    }
+   ],
+   "cause_keywords": [
+    "traversal",
+    "outside",
+    "escape"
+   ]
+  },
+  {
+   "ref": "H1",
+   "area": "correctness-general",
+   "dimension": "bug",
+   "title": "Checkout reserves item by item and never gives back what it took when a later step fails",
+   "cites": [
+    {
+     "cite": "SHOP/src/checkout/flow.py",
+     "from": 13,
+     "to": 17
+    }
+   ],
+   "cause_keywords": [
+    "release",
+    "roll back",
+    "rollback",
+    "compensat",
+    "already reserved"
+   ]
+  },
+  {
+   "ref": "H2",
+   "area": "races-distributed",
+   "dimension": "distributed",
+   "title": "The queue hands back a message whose lease ran out, and the consumer places and charges that request again",
+   "cites": [
+    {
+     "cite": "SHOP/src/jobs/checkout_queue.py",
+     "from": 9,
+     "to": 16
+    },
+    {
+     "cite": "SHOP/src/jobs/leased_queue.py",
+     "from": 30,
+     "to": 36
+    }
+   ],
+   "cause_keywords": [
+    "redeliver",
+    "delivered again",
+    "at least once",
+    "at-least-once",
+    "deduplic",
+    "request_id",
+    "idempot"
+   ]
+  },
+  {
+   "ref": "H3",
+   "area": "correctness-general",
+   "dimension": "bug",
+   "title": "pay_again turns a gateway timeout into None, so the storefront handler crashes instead of telling the buyer to retry",
+   "cites": [
+    {
+     "cite": "SHOP/src/checkout/flow.py",
+     "from": 21,
+     "to": 26
+    },
+    {
+     "cite": "SHOP/src/storefront/handlers.py",
+     "from": 13,
+     "to": 19
+    }
+   ],
+   "cause_keywords": [
+    "charge_or_none",
+    "returns none",
+    "none instead",
+    "typeerror",
+    "not subscriptable",
+    "never raise",
+    "swallow"
+   ]
+  },
+  {
+   "ref": "H4",
+   "area": "correctness-general",
+   "dimension": "bug",
+   "title": "Checkout passes an amount already in cents through to_cents, charging a hundred times the total",
+   "cites": [
+    {
+     "cite": "SHOP/src/checkout/flow.py",
+     "from": 28,
+     "to": 29
+    }
+   ],
+   "cause_keywords": [
+    "to_cents",
+    "already in cents",
+    "already cents",
+    "100 times",
+    "hundred",
+    "x100"
+   ]
+  }
+ ],
+ "decoys": [
+  {
+   "ref": "D1",
+   "title": "ORDER BY column comes from a fixed map, values are parameters",
+   "cites": [
+    {
+     "cite": "SHOP/src/catalog/store.py",
+     "from": 46,
+     "to": 51
+    }
+   ],
+   "claim_keywords": [
+    "injection",
+    "sql inj"
+   ]
+  },
+  {
+   "ref": "D2",
+   "title": "Order numbering is under the lock",
+   "cites": [
+    {
+     "cite": "SHOP/src/orders/service.py",
+     "from": 11,
+     "to": 19
+    }
+   ],
+   "claim_keywords": [
+    "race",
+    "concurren",
+    "atomic"
+   ]
+  },
+  {
+   "ref": "D3",
+   "title": "Retrying a status read is safe: it is a GET",
+   "cites": [
+    {
+     "cite": "SHOP/src/payments/client.py",
+     "from": 51,
+     "to": 59
+    }
+   ],
+   "claim_keywords": [
+    "idempot",
+    "duplicate",
+    "double"
+   ]
+  },
+  {
+   "ref": "D4",
+   "title": "random only adds jitter to retry delays",
+   "cites": [
+    {
+     "cite": "SHOP/src/payments/client.py",
+     "from": 61,
+     "to": 62
+    }
+   ],
+   "claim_keywords": [
+    "predictable",
+    "cryptograph",
+    "insecure random"
+   ]
+  },
+  {
+   "ref": "D5",
+   "title": "The worker logs the send error and raises it again",
+   "cites": [
+    {
+     "cite": "SHOP/src/jobs/worker.py",
+     "from": 38,
+     "to": 43
+    }
+   ],
+   "claim_keywords": [
+    "swallow",
+    "silenc",
+    "hides the error"
+   ]
+  },
+  {
+   "ref": "D6",
+   "title": "Report names are resolved and checked against the reports folder",
+   "cites": [
+    {
+     "cite": "SHOP/src/exports/files.py",
+     "from": 40,
+     "to": 47
+    }
+   ],
+   "claim_keywords": [
+    "traversal",
+    "outside",
+    "escape"
+   ]
+  },
+  {
+   "ref": "D7",
+   "title": "Cancel gives back exactly the stock the order held, once",
+   "cites": [
+    {
+     "cite": "SHOP/src/checkout/flow.py",
+     "from": 47,
+     "to": 52
+    }
+   ],
+   "claim_keywords": [
+    "not released",
+    "never released",
+    "released twice",
+    "release twice",
+    "double release",
+    "stock leak"
+   ]
+  }
+ ]
 }

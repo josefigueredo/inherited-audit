@@ -20,12 +20,20 @@ class PaymentsClient:
             try:
                 return self._transport.post("/charges", payload)
             except GatewayTimeout:
-                self._sleep(self._backoff(attempt))
+                if attempt + 1 < self._retries:
+                    self._sleep(self._backoff(attempt))
         raise GatewayTimeout(f"charge for order {order_number}")
 
     def refund(self, charge_id, amount_cents):
         """Refund part or all of a charge. Not retried: the caller decides after a timeout."""
         return self._transport.post(f"/charges/{charge_id}/refunds", {"amount": amount_cents})
+
+    def charge_or_none(self, order_number, amount_cents, card_token):
+        """Like charge, for callers that only want to know whether the card was charged."""
+        try:
+            return self.charge(order_number, amount_cents, card_token)
+        except GatewayTimeout:
+            return None
 
     def receipt_url(self, charge_id):
         return f"/charges/{charge_id}/receipt"
@@ -46,7 +54,8 @@ class PaymentsClient:
             try:
                 return self._transport.get(f"/charges/{charge_id}")
             except GatewayTimeout:
-                self._sleep(self._backoff(attempt))
+                if attempt + 1 < self._retries:
+                    self._sleep(self._backoff(attempt))
         raise GatewayTimeout(f"status of charge {charge_id}")
 
     def _backoff(self, attempt):
