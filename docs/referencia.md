@@ -103,8 +103,9 @@ conocen, como el banco de [`bench/`](../bench/README.md).
 
 Un hallazgo cuenta para un ítem cuando cita el mismo archivo con líneas a 15 o menos de distancia **y** una de las
 `cause_keywords` aparece en su título, en `what_happens` o en `red_reason`. Cada hallazgo cuenta para un solo ítem. Un
-hallazgo que cae sobre un señuelo y dice lo que dice su `claim_keywords` es un falso positivo. Los descartados no
-cuentan para nada. Si un señuelo está a 15 líneas o menos de un ítem, la clave se rechaza, porque un mismo hallazgo
+hallazgo que cae sobre un señuelo y dice lo que dice su `claim_keywords` es un falso positivo, salvo que ya cuente
+(en lugar y en causa) para algún ítem: ese hallazgo habla del ítem y cita el señuelo como contraste («en cambio,
+esta otra función valida»). La regla no depende del orden de las citas. Los descartados no cuentan para nada. Si un señuelo está a 15 líneas o menos de un ítem, la clave se rechaza, porque un mismo hallazgo
 contaría como acierto y como error. Con `area`, el resultado se desglosa por área. El puntaje es un candidato: cada
 par hay que confirmarlo leyendo los dos.
 
