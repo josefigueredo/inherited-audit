@@ -109,7 +109,19 @@ sigue saturado y hay que rediseñarlo antes de gastar en la de workers.
 | Versión | sha | Ítems | Resultado |
 |---|---|---|---|
 | 1 | `605d764` | 10 (9 sembrados + R4) | respaldo y workers: 10/10, 0 señuelos. Corrección confirmados: 11 de 14 (respaldo) contra 17 de 19 (workers). Calidad: respaldo dejó sus 10 en candidato; workers confirmó 11. Workers costó $23,34; el costo de respaldo no se guardó (por tokens, ~55–65% de eso, una inferencia) |
-| 2 | ver `key.json` | 14 (+ H1 a H4) | sin corridas todavía |
+| 2 | `87de319` | 14 (+ H1 a H4) | Solo respaldo: `eval` dio 12/14 y 0/7 señuelos; leído par por par, 13/14 y los cuatro difíciles (S2 lo encontró, pero la clave no tiene la palabra `owner`; R4 no lo encontró). $18,57, 31 min. Encontró además dos defectos reales sin sembrar en `checkout` (`pay_again` cobra antes de verificar que el pedido siga sin pagar). Workers no se corrió: el máximo que podía sacar de diferencia era un ítem |
+
+### Conclusión hasta acá
+
+**En un sistema de este tamaño, respaldo y workers empatan en lo que encuentran, y los workers cuestan más.** La versión
+2 hizo más difíciles los problemas y no cambió nada, porque el límite no era la dificultad sino el tamaño: los siete
+módulos entran enteros en el contexto de una sola pasada. Así, el pase de respaldo lee todo y cruza módulos igual que
+lo haría un worker por módulo. La ventaja de repartir el trabajo solo puede aparecer en un sistema que no entra de una
+vez. Para medirla hace falta otro banco: un sistema real de decenas de miles de líneas, con problemas ya conocidos
+(issues cerrados con su arreglo) en lugar de sembrados. Ese banco no existe todavía.
+
+Con una corrida por lado (dos en la versión 1, una en la 2) esto es una señal, no una medición: los modelos no dan lo
+mismo dos veces.
 
 `ia.py eval` rechaza una corrida de otra versión (`check_sha`); para volver a medir una de la versión 1, usá la clave
 de esa versión desde git (`git show <commit>:bench/key.json`).
