@@ -99,10 +99,15 @@ def score(reference: dict, findings: List[dict], slack: int = SLACK, repos: Opti
     found = [i["ref"] for i in items if i["ref"] in assigned]
     missed = [i["ref"] for i in items if i["ref"] not in assigned]
     pass_at = reference.get("pass_at", len(items))
+    # A finding that matches a seeded item in place and cause is about that item: when it also cites a decoy, it cites
+    # it as contrast ("read_report, unlike this, is guarded"), so it never counts as a false positive. The rule needs
+    # no order among the evidence cites, which the finding schema does not fix.
+    about_an_item = {fid for ids in candidates.values() for fid in ids}
     decoy_hits: Dict[str, List[str]] = {}
     for d in reference.get("decoys") or []:
         d = {**d, "cites": _normalise(d.get("cites"), ref_dirs)}
-        hits = [f["id"] for f in norm if match(d, f, slack) and cause_match(d, f, "claim_keywords")]
+        hits = [f["id"] for f in norm if f["id"] not in about_an_item
+                and match(d, f, slack) and cause_match(d, f, "claim_keywords")]
         if hits:
             decoy_hits[d["ref"]] = hits
     false_positives = len({fid for ids in decoy_hits.values() for fid in ids})

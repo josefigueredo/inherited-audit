@@ -228,6 +228,23 @@ class DecoyTest(unittest.TestCase):
         self.assertEqual(result["false_positives"], 2)
         self.assertFalse(result["pass"])
 
+    def test_a_finding_about_an_item_that_cites_a_decoy_as_contrast_is_not_a_false_positive(self):
+        # Measured on the bench: C-02 found the traversal and cited the guarded read_report as "this one is fine".
+        contrast = finding("C-01", title="BOOM: injection here, unlike the parameterised query")
+        contrast["evidence"].append({"cite": "BACK/src/a.ts", "from": 62, "to": 64})
+        duplicate = dict(contrast, id="C-02", verdict="candidate")
+        reference = self.reference([ref()], [decoy()], max_decoy_hits=0)
+        result = evaluate.score(reference, [contrast, duplicate])
+        self.assertEqual(result["decoy_hits"], {})
+        self.assertEqual(result["false_positives"], 0)
+        self.assertTrue(result["pass"])
+
+    def test_a_finding_about_no_item_still_counts_on_a_decoy_whatever_its_cite_order(self):
+        stray = finding("C-02", a=200, b=202, title="injection")
+        stray["evidence"].append({"cite": "BACK/src/a.ts", "from": 62, "to": 64})
+        result = evaluate.score(self.reference([ref()], [decoy()]), [finding("C-01"), stray])
+        self.assertEqual(result["decoy_hits"], {"D1": ["C-02"]})
+
     def test_reference_without_decoys_or_areas_reports_as_before(self):
         reference = {"system": "x", "sha": "0" * 40, "pass_at": 1, "items": [ref()]}
         text = "\n".join(evaluate.report_lines(reference, evaluate.score(reference, [finding()])))
