@@ -20,7 +20,8 @@ class PaymentsClient:
             try:
                 return self._transport.post("/charges", payload)
             except GatewayTimeout:
-                self._sleep(self._backoff(attempt))
+                if attempt + 1 < self._retries:
+                    self._sleep(self._backoff(attempt))
         raise GatewayTimeout(f"charge for order {order_number}")
 
     def refund(self, charge_id, amount_cents):
@@ -46,7 +47,8 @@ class PaymentsClient:
             try:
                 return self._transport.get(f"/charges/{charge_id}")
             except GatewayTimeout:
-                self._sleep(self._backoff(attempt))
+                if attempt + 1 < self._retries:
+                    self._sleep(self._backoff(attempt))
         raise GatewayTimeout(f"status of charge {charge_id}")
 
     def _backoff(self, attempt):

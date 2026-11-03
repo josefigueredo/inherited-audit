@@ -12,7 +12,7 @@ class Orders:
         with self._lock:
             number = self._next
             self._next = number + 1
-            order = {"number": number, "owner": owner, "items": list(items), "status": "placed"}
+            order = {"number": number, "owner": owner, "items": [dict(item) for item in items], "status": "placed"}
             self._orders[number] = order
         return order
 
@@ -38,6 +38,8 @@ class Orders:
 
     def list_for(self, owner, page=1, per_page=20):
         """Orders of `owner`, oldest first, `per_page` per page; pages start at 1."""
+        if page < 1:
+            raise ValueError(f"pages start at 1: {page}")
         with self._lock:
             mine = [o for o in self._orders.values() if o["owner"] == owner]
         mine.sort(key=lambda o: o["number"])
