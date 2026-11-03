@@ -1,7 +1,7 @@
 # Banco de prueba: workers contra pases de respaldo
 
-Un sistema chico (una tienda en Python, solo biblioteca estándar) con **nueve problemas sembrados** y **seis
-señuelos**, más la clave para medir con `ia.py eval` cuántos encuentra una auditoría y cuántos falsos positivos marca.
+Un sistema chico (una tienda en Python, solo biblioteca estándar) con **diez problemas** (nueve sembrados y uno
+que encontró una corrida) y **seis señuelos**, más la clave para medir con `ia.py eval` cuántos encuentra una auditoría y cuántos falsos positivos marca.
 Sirve para comparar, sobre el mismo commit, una corrida con los workers externos (`/code-review`, `claude-security`,
 `feature-dev`) contra otra con los pases de respaldo de la skill.
 
@@ -75,7 +75,11 @@ No los leas como una comparación entre worker y respaldo.
 - **El banco está sesgado.** Los problemas los sembró la misma familia de modelos que escribió los pases de respaldo,
   y son patrones conocidos en un sistema chico. Sirve para comparar dos lados sobre la misma clave, no como medida
   absoluta de lo que encuentra una auditoría en un sistema real.
-- `pass_at` (6 de 9) y `max_decoy_hits` (1) son un primer corte elegido a ojo, no un estándar.
+- `pass_at` (7 de 10) y `max_decoy_hits` (1) son un primer corte elegido a ojo, no un estándar.
+- **R4 no se sembró:** lo encontró la primera corrida de respaldo y se sumó con su prueba. `total_size`
+  (`files.py` 31-32) tiene otra carrera real que quedó fuera de la clave porque está a menos de 15 líneas de D6:
+  una corrida que la reporta acierta, y el puntaje la ignora. Se suma cuando el próximo cambio del sha separe los dos.
+- **Un hallazgo que cuenta para un ítem nunca es falso positivo**, aunque cite un señuelo: lo cita como contraste.
 
 ## Si cambiás el banco
 

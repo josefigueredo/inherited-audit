@@ -75,7 +75,7 @@ class BenchBuildTest(unittest.TestCase):
 class BenchKeyTest(unittest.TestCase):
     def test_key_loads_and_no_decoy_sits_next_to_an_item(self):
         loaded = evaluate.load_reference(BENCH / "key.json")
-        self.assertEqual(len(loaded["items"]), 9)
+        self.assertEqual(len(loaded["items"]), 10)
         self.assertEqual(len(loaded["decoys"]), 6)
 
     def test_every_cite_is_inside_its_file(self):
@@ -139,7 +139,7 @@ class BenchAuditTest(unittest.TestCase):
                                   str(out)]).returncode, 0)
         result = run_cli(["eval", "--run", str(out), "--reference", str(BENCH / "key.json")])
         self.assertEqual(result.returncode, 1, result.stderr)  # no findings yet: a FAIL, not a usage error
-        self.assertIn("candidate score: 0/9 (pass at 6)", result.stdout)
+        self.assertIn("candidate score: 0/10 (pass at 7)", result.stdout)
         self.assertIn("decoys hit: 0/6; false-positive findings: 0 (allowed 1)", result.stdout)
 
 
