@@ -15,21 +15,18 @@ class Checkout:
         for item in items:
             self._inventory.reserve(item["sku"], item["qty"])
         order = self._orders.place(owner, items)
-        total = self._orders.total_cents(order["number"], self._prices)
-        charge = self._payments.charge(order["number"], to_cents(total), card_token)
+        charge = self._payments.charge(order["number"], self._amount_cents(order["number"]), card_token)
         return self._orders.mark_paid(order["number"], charge["id"])
 
     def pay_again(self, number, card_token):
-        """Charge an order whose first payment did not go through. Every attempt is written to the attempt log,
-        and a gateway error reaches the caller, who decides whether to tell the buyer."""
-        paid = None
-        try:
-            total = self._orders.total_cents(number, self._prices)
-            charge = self._payments.charge(number, total, card_token)
-            paid = self._orders.mark_paid(number, charge["id"])
-        finally:
-            self._attempts.append((number, "paid" if paid else "failed"))
-            return paid
+        """Charge an order whose first payment did not go through. Every attempt goes to the attempt log."""
+        charge = self._payments.charge_or_none(number, self._amount_cents(number), card_token)
+        paid = self._orders.mark_paid(number, charge["id"]) if charge else None
+        self._attempts.append((number, "paid" if paid else "failed"))
+        return paid
+
+    def _amount_cents(self, number):
+        return to_cents(self._orders.total_cents(number, self._prices))
 
     def attempts_for(self, number):
         return [outcome for n, outcome in self._attempts if n == number]

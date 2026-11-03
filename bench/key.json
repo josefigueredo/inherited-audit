@@ -1,12 +1,12 @@
 {
  "system": "shop (inherited-audit bench)",
- "sha": "66dde3bd6c0cc7bdcd7e168dba44c3e9fab33fec",
+ "sha": "87de31923ec3daccef58b56beee58c9841ff4bf4",
  "aliases": {
   "SHOP": ""
  },
  "pass_at": 9,
  "max_decoy_hits": 1,
- "notes": "v2. Seeded and written by the same model family that runs the fallback passes; read the scores as a comparison between arms on the same key, not as an absolute measure. Each item and decoy has a proof in bench/proofs/ (items fail at sha, decoys pass). Pre-registered before any v2 run: the primary measure is how many of the hard items H1-H4 each arm finds (they need reading across modules: checkout with catalog, orders and payments, and the queue's delivery contract); then false positives; then cost from /cost. pass_at (9 of 14) and max_decoy_hits are a first, arbitrary bar. Protocol: init with --lang en and ask for finding titles and what_happens in English; the keywords are English only and were written before any v2 run. R4 was not planted: a v1 run found it. Six defects nobody planted that v1 runs found (negative quantities, shared item dicts, page 0, a sleep after the last retry, total_size on a vanished file, a symlinked reports folder) are fixed in v2. v1 (sha 605d764, 10 items) scored 10/10 with 0 decoys on both arms: it saturated.",
+ "notes": "v2. Seeded and written by the same model family that runs the fallback passes; read the scores as a comparison between arms on the same key, not as an absolute measure. Each item and decoy has a proof in bench/proofs/ (items fail at sha, decoys pass). Pre-registered before any v2 run: the primary measure is how many of the hard items H1-H4 each arm finds (each needs more than one function, and H2-H4 more than one module: the queue's lease contract, the gateway client's timeout handling, the storefront handler and the money helpers); then false positives; then cost from /cost. pass_at (9 of 14) and max_decoy_hits are a first, arbitrary bar. Protocol: init with --lang en and ask for finding titles and what_happens in English; the keywords are English only and were written before any v2 run. R4 was not planted: a v1 run found it. Six defects nobody planted that v1 runs found (negative quantities, shared item dicts, page 0, a sleep after the last retry, total_size on a vanished file, a symlinked reports folder) are fixed in v2. v1 (sha 605d764, 10 items) scored 10/10 with 0 decoys on both arms: it saturated.",
  "items": [
   {
    "ref": "C1",
@@ -16,8 +16,8 @@
    "cites": [
     {
      "cite": "SHOP/src/orders/service.py",
-     "from": 39,
-     "to": 47
+     "from": 41,
+     "to": 49
     }
    ],
    "cause_keywords": [
@@ -161,8 +161,8 @@
    "cites": [
     {
      "cite": "SHOP/src/orders/service.py",
-     "from": 49,
-     "to": 56
+     "from": 51,
+     "to": 58
     }
    ],
    "cause_keywords": [
@@ -214,12 +214,17 @@
    "ref": "H2",
    "area": "races-distributed",
    "dimension": "distributed",
-   "title": "The queue delivers at least once and the consumer places and charges a redelivered request again",
+   "title": "The queue hands back a message whose lease ran out, and the consumer places and charges that request again",
    "cites": [
     {
      "cite": "SHOP/src/jobs/checkout_queue.py",
-     "from": 12,
-     "to": 19
+     "from": 9,
+     "to": 16
+    },
+    {
+     "cite": "SHOP/src/jobs/leased_queue.py",
+     "from": 30,
+     "to": 36
     }
    ],
    "cause_keywords": [
@@ -236,20 +241,27 @@
    "ref": "H3",
    "area": "correctness-general",
    "dimension": "bug",
-   "title": "A return inside finally swallows the gateway error that pay_again promises to raise",
+   "title": "pay_again turns a gateway timeout into None, so the storefront handler crashes instead of telling the buyer to retry",
    "cites": [
     {
      "cite": "SHOP/src/checkout/flow.py",
-     "from": 22,
-     "to": 32
+     "from": 21,
+     "to": 26
+    },
+    {
+     "cite": "SHOP/src/storefront/handlers.py",
+     "from": 13,
+     "to": 19
     }
    ],
    "cause_keywords": [
-    "finally",
-    "swallow",
-    "suppress",
-    "silenc",
-    "never raise"
+    "charge_or_none",
+    "returns none",
+    "none instead",
+    "typeerror",
+    "not subscriptable",
+    "never raise",
+    "swallow"
    ]
   },
   {
@@ -260,8 +272,8 @@
    "cites": [
     {
      "cite": "SHOP/src/checkout/flow.py",
-     "from": 18,
-     "to": 19
+     "from": 28,
+     "to": 29
     }
    ],
    "cause_keywords": [
@@ -297,7 +309,7 @@
     {
      "cite": "SHOP/src/orders/service.py",
      "from": 11,
-     "to": 17
+     "to": 19
     }
    ],
    "claim_keywords": [
@@ -312,8 +324,8 @@
    "cites": [
     {
      "cite": "SHOP/src/payments/client.py",
-     "from": 44,
-     "to": 52
+     "from": 51,
+     "to": 59
     }
    ],
    "claim_keywords": [
@@ -328,8 +340,8 @@
    "cites": [
     {
      "cite": "SHOP/src/payments/client.py",
-     "from": 54,
-     "to": 55
+     "from": 61,
+     "to": 62
     }
    ],
    "claim_keywords": [
@@ -376,8 +388,8 @@
    "cites": [
     {
      "cite": "SHOP/src/checkout/flow.py",
-     "from": 50,
-     "to": 55
+     "from": 47,
+     "to": 52
     }
    ],
    "claim_keywords": [

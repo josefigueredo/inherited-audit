@@ -9,6 +9,8 @@ class Orders:
         self._orders = {}
 
     def place(self, owner, items):
+        if any(item["qty"] <= 0 for item in items):
+            raise ValueError("every item needs a positive quantity")
         with self._lock:
             number = self._next
             self._next = number + 1

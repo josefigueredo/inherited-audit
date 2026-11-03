@@ -9,8 +9,9 @@ Los problemas son de dos niveles:
 
 - **Diez de manual** (C, R, S): se ven leyendo una función. La versión 1 del banco tenía solo estos, y los dos lados
   sacaron 10/10: no sirven para distinguirlos.
-- **Cuatro difíciles** (H1 a H4): para verlos hay que leer más de un módulo. `checkout` usa el stock del catálogo, los
-  pedidos y la pasarela de pagos, y la cola tiene su propio contrato de entrega. **Son la medida principal.**
+- **Cuatro difíciles** (H1 a H4): para verlos hay que leer más de una función, y para H2 a H4 más de un módulo: el
+  contrato de la cola, cómo el cliente de pagos maneja un timeout, el handler de la tienda y los helpers de plata.
+  Ningún docstring ni linter los señala. **Son la medida principal.**
 
 ## Qué hay
 
@@ -107,7 +108,7 @@ sigue saturado y hay que rediseñarlo antes de gastar en la de workers.
 
 | Versión | sha | Ítems | Resultado |
 |---|---|---|---|
-| 1 | `605d764` | 10 (9 sembrados + R4) | respaldo y workers: 10/10, 0 señuelos. Workers: 28 hallazgos confirmados contra 14, por $23,34 (el costo de respaldo no se guardó; por tokens, ~55–65% de eso) |
+| 1 | `605d764` | 10 (9 sembrados + R4) | respaldo y workers: 10/10, 0 señuelos. Corrección confirmados: 11 de 14 (respaldo) contra 17 de 19 (workers). Calidad: respaldo dejó sus 10 en candidato; workers confirmó 11. Workers costó $23,34; el costo de respaldo no se guardó (por tokens, ~55–65% de eso, una inferencia) |
 | 2 | ver `key.json` | 14 (+ H1 a H4) | sin corridas todavía |
 
 `ia.py eval` rechaza una corrida de otra versión (`check_sha`); para volver a medir una de la versión 1, usá la clave

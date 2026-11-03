@@ -125,13 +125,13 @@ class BenchAuditTest(unittest.TestCase):
         self.assertEqual(detect.returncode, 0, detect.stderr)
         manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(sorted(manifest["modules"]["SHOP"]),
-                         ["src/catalog", "src/checkout", "src/exports", "src/jobs", "src/orders", "src/payments"])
+                         ["src/catalog", "src/checkout", "src/exports", "src/jobs", "src/orders", "src/payments", "src/storefront"])
         base = run_cli(["baseline", "--run", str(out), "--timeout", "120"])
         self.assertEqual(base.returncode, 0, base.stdout + base.stderr)
         manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["steps"]["baseline"], "done")
         result = manifest["baseline"]["SHOP"]["result"]
-        self.assertEqual((result["passed"], result["failed"], result["total"]), (14, 0, 14))
+        self.assertEqual((result["passed"], result["failed"], result["total"]), (16, 0, 16))
 
     def test_eval_accepts_a_run_of_the_bench(self):
         out = make_dir() / "run"

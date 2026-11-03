@@ -28,6 +28,13 @@ class PaymentsClient:
         """Refund part or all of a charge. Not retried: the caller decides after a timeout."""
         return self._transport.post(f"/charges/{charge_id}/refunds", {"amount": amount_cents})
 
+    def charge_or_none(self, order_number, amount_cents, card_token):
+        """Like charge, for callers that only want to know whether the card was charged."""
+        try:
+            return self.charge(order_number, amount_cents, card_token)
+        except GatewayTimeout:
+            return None
+
     def receipt_url(self, charge_id):
         return f"/charges/{charge_id}/receipt"
 

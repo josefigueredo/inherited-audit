@@ -1,7 +1,4 @@
-"""Consumer for the checkout requests that the storefront puts on the queue.
-
-The queue delivers every message at least once: a message whose ack does not arrive in time is delivered again.
-Each request carries the storefront's `request_id`."""
+"""Consumer for the checkout requests that the storefront queues."""
 
 
 class CheckoutConsumer:
